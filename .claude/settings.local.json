@@ -12,7 +12,10 @@
       "Bash(npx eslint src/extension.ts)",
       "Bash(npx tsc:*)",
       "Bash(echo:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(git -C /Users/ido/source/agent-panes status:*)",
+      "Bash(git -C /Users/ido/source/agent-panes diff HEAD)",
+      "Bash(git -C /Users/ido/source/agent-panes log --oneline -10)"
     ]
   },
   "hooks": {
