@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { CCHudConfig, getAbsolutePath } from '../config';
 import { parsePlan, TodoItem } from '../planParser';
+import { error } from '../utils/logger';
 
 export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<TodoTreeItem | undefined | null | void> = new vscode.EventEmitter<TodoTreeItem | undefined | null | void>();
@@ -29,7 +30,7 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeItem> {
         }
 
         const planPath = getAbsolutePath(this.config.planPath);
-        if (!planPath || !fs.existsSync(planPath)) {
+        if (planPath === undefined || planPath === '' || !fs.existsSync(planPath)) {
             return Promise.resolve([]);
         }
 
@@ -40,8 +41,8 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeItem> {
             return Promise.resolve(
                 parsed.items.map(item => new TodoTreeItem(item, this.config))
             );
-        } catch (error) {
-            console.error('Failed to parse plan:', error);
+        } catch (err) {
+            error('Failed to parse plan:', err);
             return Promise.resolve([]);
         }
     }
@@ -65,7 +66,7 @@ export class TodoTreeItem extends vscode.TreeItem {
 
         // Command to open plan.md at the specific line
         const planPath = getAbsolutePath(config.planPath);
-        if (planPath) {
+        if (planPath !== undefined && planPath !== '') {
             this.command = {
                 command: 'vscode.open',
                 title: 'Open Plan',

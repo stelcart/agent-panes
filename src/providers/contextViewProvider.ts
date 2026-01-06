@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { CCHudConfig, getAbsolutePath } from '../config';
 import { loadContext, saveContext, ContextItem } from '../context';
 import { escapeHtml } from '../utils/html';
+import { error } from '../utils/logger';
 
 export class ContextViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'cc-hud.context';
@@ -39,9 +40,9 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
                     if (typeof message.index === 'number' && Number.isInteger(message.index) && message.index >= 0) {
                         try {
                             this._toggleItem(message.index);
-                        } catch (error) {
-                            console.error('CC HUD: Error toggling item:', error);
-                            vscode.window.showErrorMessage('CC HUD: Failed to toggle item. Check the console for details.');
+                        } catch (err) {
+                            error('CC HUD: Error toggling item:', err);
+                            vscode.window.showErrorMessage('CC HUD: Failed to toggle item. Check the output channel for details.');
                         }
                     }
                     break;
@@ -50,9 +51,9 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
                     if (typeof message.index === 'number' && Number.isInteger(message.index) && message.index >= 0) {
                         try {
                             this._removeItem(message.index);
-                        } catch (error) {
-                            console.error('CC HUD: Error removing item:', error);
-                            vscode.window.showErrorMessage('CC HUD: Failed to remove item. Check the console for details.');
+                        } catch (err) {
+                            error('CC HUD: Error removing item:', err);
+                            vscode.window.showErrorMessage('CC HUD: Failed to remove item. Check the output channel for details.');
                         }
                     }
                     break;
@@ -85,7 +86,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         // Get plan size
         const planPath = getAbsolutePath(this._config.planPath);
         let planSize = 0;
-        if (planPath) {
+        if (planPath !== undefined && planPath !== '') {
             try {
                 planSize = fs.readFileSync(planPath, 'utf8').length;
             } catch {
@@ -96,7 +97,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         // Get session stats
         const statsPath = getAbsolutePath(this._config.statsPath);
         let sessionTokens = 0;
-        if (statsPath) {
+        if (statsPath !== undefined && statsPath !== '') {
             try {
                 const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
                 sessionTokens = stats.estimatedTokens ?? 0;
@@ -130,7 +131,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
 
     private async _openFile(filePath: string): Promise<void> {
         const absolutePath = getAbsolutePath(filePath);
-        if (!absolutePath) {
+        if (absolutePath === undefined || absolutePath === '') {
             return;
         }
         try {
@@ -150,8 +151,8 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         let loadError = false;
         try {
             context = loadContext();
-        } catch (error) {
-            console.error('CC HUD: Unexpected error loading context:', error);
+        } catch (err) {
+            error('CC HUD: Unexpected error loading context:', err);
             context = { items: [] };
             loadError = true;
         }
@@ -159,7 +160,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         // Check if context.json exists to differentiate between "no items" and "error loading"
         const contextPath = getAbsolutePath('.cc/context.json');
         let contextFileExists = false;
-        if (contextPath) {
+        if (contextPath !== undefined && contextPath !== '') {
             try {
                 fs.accessSync(contextPath, fs.constants.R_OK);
                 contextFileExists = true;
@@ -177,11 +178,11 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         }
 
         // Get plan.md size
-        const planPath = getAbsolutePath(this._config.planPath);
+        const planPathForSize = getAbsolutePath(this._config.planPath);
         let planSize = 0;
-        if (planPath) {
+        if (planPathForSize !== undefined && planPathForSize !== '') {
             try {
-                const planContent = fs.readFileSync(planPath, 'utf8');
+                const planContent = fs.readFileSync(planPathForSize, 'utf8');
                 planSize = planContent.length;
             } catch {
                 // File doesn't exist or can't be read, use default size
@@ -189,11 +190,11 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         }
 
         // Get session stats from stats.json (written by sync-context hook)
-        const statsPath = getAbsolutePath(this._config.statsPath);
+        const statsPathForSize = getAbsolutePath(this._config.statsPath);
         let sessionTokens = 0;
-        if (statsPath) {
+        if (statsPathForSize !== undefined && statsPathForSize !== '') {
             try {
-                const statsContent = fs.readFileSync(statsPath, 'utf8');
+                const statsContent = fs.readFileSync(statsPathForSize, 'utf8');
                 const stats = JSON.parse(statsContent);
                 sessionTokens = stats.estimatedTokens ?? 0;
             } catch {

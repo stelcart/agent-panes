@@ -58,7 +58,7 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
 
     private async _toggleCheckbox(line: number): Promise<void> {
         const planPath = getAbsolutePath(this._config.planPath);
-        if (!planPath) {
+        if (planPath === undefined || planPath === '') {
             return;
         }
 
@@ -75,7 +75,7 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
 
     private async _openPlanFile(): Promise<void> {
         const planPath = getAbsolutePath(this._config.planPath);
-        if (!planPath) {
+        if (planPath === undefined || planPath === '') {
             return;
         }
         try {
@@ -101,7 +101,7 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
         const planPath = getAbsolutePath(this._config.planPath);
         let markdownContent = '*No plan file found. Run "CC HUD: Initialize" first.*';
 
-        if (planPath) {
+        if (planPath !== undefined && planPath !== '') {
             try {
                 markdownContent = fs.readFileSync(planPath, 'utf8');
             } catch {

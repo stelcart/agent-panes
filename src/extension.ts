@@ -8,6 +8,7 @@ import { loadConfig } from './config';
 import { pinCurrentFile, updatePinnedFileSizes } from './context';
 import { invalidateCache } from './utils/fileCache';
 import { PinnedFileWatcher } from './pinnedFileWatcher';
+import { log, error, disposeLogger } from './utils/logger';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const config = loadConfig();
@@ -27,8 +28,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     await vscode.commands.executeCommand('workbench.action.moveViewToSecondarySideBar');
                     // Remember that we've done this
                     await context.globalState.update('hasMovedToSecondarySidebar', true);
-                } catch (error) {
-                    console.log('CC HUD: Could not auto-move to secondary sidebar:', error);
+                } catch (err) {
+                    log('CC HUD: Could not auto-move to secondary sidebar:', err);
                 }
             })();
         }, 500);
@@ -174,8 +175,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 // Also refresh context pane since it includes plan.md in token calculation
                 contextProvider.refresh();
                 void updateStatusBar(statusBarItem, contextProvider);
-            } catch (error) {
-                console.error('CC HUD: Error handling plan file change:', error);
+            } catch (err) {
+                error('CC HUD: Error handling plan file change:', err);
             }
         }, DEBOUNCE_DELAY);
     };
@@ -216,8 +217,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 void updateStatusBar(statusBarItem, contextProvider);
                 // Sync watchers when context.json changes (files may have been pinned/unpinned)
                 pinnedFileWatcher.syncWatchers();
-            } catch (error) {
-                console.error('CC HUD: Error handling context file change:', error);
+            } catch (err) {
+                error('CC HUD: Error handling context file change:', err);
             }
         }, DEBOUNCE_DELAY);
     };
@@ -236,8 +237,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             try {
                 contextProvider.refresh();
                 void updateStatusBar(statusBarItem, contextProvider);
-            } catch (error) {
-                console.error('CC HUD: Error handling stats file change:', error);
+            } catch (err) {
+                error('CC HUD: Error handling stats file change:', err);
             }
         }, DEBOUNCE_DELAY);
     };
@@ -253,10 +254,12 @@ async function updateStatusBar(statusBarItem: vscode.StatusBarItem, contextProvi
     try {
         const percent = await contextProvider.getContextPercent();
         statusBarItem.text = `$(hubot) CC HUD: Context ${percent}%`;
-    } catch (error) {
+    } catch (err) {
         statusBarItem.text = '$(hubot) CC HUD: Context --%';
-        console.error('CC HUD: Error updating status bar:', error);
+        error('CC HUD: Error updating status bar:', err);
     }
 }
 
-export function deactivate(): void {}
+export function deactivate(): void {
+    disposeLogger();
+}

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CCHudConfig, getAbsolutePath } from '../config';
 import { escapeHtml } from '../utils/html';
+import { error } from '../utils/logger';
 
 function getNonce(): string {
     return crypto.randomBytes(16).toString('base64');
@@ -79,7 +80,7 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
 
     private _setupWatcher(): void {
         const logPath = getAbsolutePath(this._config.logPath);
-        if (!logPath) {
+        if (logPath === undefined || logPath === '') {
             return;
         }
 
@@ -102,10 +103,10 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
                         }, 150);
                     }
                 });
-                this._watcher.on('error', (err) => console.error('CC HUD: Log watcher error:', err));
+                this._watcher.on('error', (err) => error('CC HUD: Log watcher error:', err));
             }
-        } catch (error) {
-            console.error('Failed to setup log watcher:', error);
+        } catch (err) {
+            error('Failed to setup log watcher:', err);
         }
     }
 
@@ -124,7 +125,7 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
 
     private async _openLogFile(): Promise<void> {
         const logPath = getAbsolutePath(this._config.logPath);
-        if (!logPath) {
+        if (logPath === undefined || logPath === '') {
             return;
         }
         try {
@@ -139,7 +140,7 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
         const logPath = getAbsolutePath(this._config.logPath);
         let logContent = '';
 
-        if (logPath) {
+        if (logPath !== undefined && logPath !== '') {
             try {
                 const MAX_READ_SIZE = 1024 * 1024; // 1MB limit
                 const stats = fs.statSync(logPath);

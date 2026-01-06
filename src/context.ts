@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getAbsolutePath, getWorkspaceRoot } from './config';
+import { warn, error } from './utils/logger';
 
 export interface ContextItem {
     type: 'file' | 'snippet' | 'note';
@@ -52,7 +53,7 @@ export function loadContext(): ContextData {
         const parsed = JSON.parse(content);
         // Validate that result has items array
         if (parsed === null || parsed === undefined || !Array.isArray(parsed.items)) {
-            console.warn('CC HUD: context.json does not have a valid items array');
+            warn('CC HUD: context.json does not have a valid items array');
             return { items: [] };
         }
 
@@ -62,15 +63,15 @@ export function loadContext(): ContextData {
             if (isValidContextItem(parsed.items[i])) {
                 validItems.push(parsed.items[i]);
             } else {
-                console.warn(`CC HUD: Invalid context item at index ${i}, skipping:`, parsed.items[i]);
+                warn(`CC HUD: Invalid context item at index ${i}, skipping:`, parsed.items[i]);
             }
         }
 
         return { items: validItems };
-    } catch (error) {
+    } catch (err) {
         // Only log if it's not a "file not found" error
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-            console.error('CC HUD: Failed to load context.json:', error);
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            error('CC HUD: Failed to load context.json:', err);
         }
         return { items: [] };
     }
@@ -79,15 +80,15 @@ export function loadContext(): ContextData {
 export function saveContext(data: ContextData): boolean {
     const contextPath = getAbsolutePath('.cc/context.json');
     if (contextPath === undefined || contextPath === '') {
-        console.warn('CC HUD: Cannot save context - no workspace folder found');
+        warn('CC HUD: Cannot save context - no workspace folder found');
         return false;
     }
 
     try {
         fs.writeFileSync(contextPath, JSON.stringify(data, null, 2));
         return true;
-    } catch (error) {
-        console.error('CC HUD: Failed to save context:', error);
+    } catch (err) {
+        error('CC HUD: Failed to save context:', err);
         return false;
     }
 }
@@ -245,7 +246,7 @@ export function getPinnedFilePaths(): string[] {
 export function calculateContextPercent(contextTokenLimit: number): number {
     // Guard against division by zero or negative values
     if (!Number.isFinite(contextTokenLimit) || contextTokenLimit <= 0) {
-        console.warn(`CC HUD: Invalid contextTokenLimit (${contextTokenLimit}), returning 0%`);
+        warn(`CC HUD: Invalid contextTokenLimit (${contextTokenLimit}), returning 0%`);
         return 0;
     }
 
@@ -266,10 +267,10 @@ export function calculateContextPercent(contextTokenLimit: number): number {
         try {
             const planContent = fs.readFileSync(planPath, 'utf8');
             totalChars += planContent.length;
-        } catch (error) {
+        } catch (err) {
             // Only log if it's not a "file not found" error
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                console.error('CC HUD: Failed to read plan.md for context calculation:', error);
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                error('CC HUD: Failed to read plan.md for context calculation:', err);
             }
         }
     }

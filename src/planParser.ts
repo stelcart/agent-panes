@@ -1,3 +1,5 @@
+import { warn, debug } from './utils/logger';
+
 /** Valid status characters for checkbox markers in plan files */
 export type StatusChar = ' ' | 'x' | '>' | '!';
 
@@ -102,7 +104,7 @@ export function parsePlan(content: string): ParsedPlan {
 export function toggleCheckbox(content: string, line: number): string {
     // Validate line number
     if (!Number.isInteger(line) || line < 1) {
-        console.warn(`[planParser] toggleCheckbox: Invalid line number ${line}, must be a positive integer`);
+        warn(`[planParser] toggleCheckbox: Invalid line number ${line}, must be a positive integer`);
         return content;
     }
 
@@ -111,7 +113,7 @@ export function toggleCheckbox(content: string, line: number): string {
 
     // Check if line exists
     if (lineIndex >= lines.length) {
-        console.warn(`[planParser] toggleCheckbox: Line ${line} is out of bounds (file has ${lines.length} lines)`);
+        warn(`[planParser] toggleCheckbox: Line ${line} is out of bounds (file has ${lines.length} lines)`);
         return content;
     }
 
@@ -119,13 +121,13 @@ export function toggleCheckbox(content: string, line: number): string {
 
     // Handle empty or undefined lines
     if (targetLine === undefined || targetLine === '') {
-        console.debug(`[planParser] toggleCheckbox: Line ${line} is empty`);
+        debug(`[planParser] toggleCheckbox: Line ${line} is empty`);
         return content;
     }
 
     const match = targetLine.match(/^(\s*-\s*\[)([ x~>!])(\].*)$/);
     if (!match) {
-        console.debug(`[planParser] toggleCheckbox: Line ${line} does not contain a valid checkbox: "${targetLine.substring(0, 50)}..."`);
+        debug(`[planParser] toggleCheckbox: Line ${line} does not contain a valid checkbox: "${targetLine.substring(0, 50)}..."`);
         return content;
     }
 
@@ -151,11 +153,11 @@ export function toggleCheckbox(content: string, line: number): string {
             break;
         default:
             // This should never happen due to regex, but handle gracefully
-            console.warn(`[planParser] toggleCheckbox: Unexpected status character '${currentStatus}' at line ${line}`);
+            warn(`[planParser] toggleCheckbox: Unexpected status character '${currentStatus}' at line ${line}`);
             newStatus = ' ';
     }
 
-    console.debug(`[planParser] toggleCheckbox: Line ${line} status changed from '${currentStatus}' to '${newStatus}'`);
+    debug(`[planParser] toggleCheckbox: Line ${line} status changed from '${currentStatus}' to '${newStatus}'`);
     lines[lineIndex] = match[1] + newStatus + match[3];
     return lines.join('\n');
 }
