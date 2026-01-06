@@ -6,6 +6,12 @@ import { loadContext, saveContext, ContextItem } from '../context';
 import { escapeHtml } from '../utils/html';
 import { error } from '../utils/logger';
 
+interface SessionStats {
+    sessionTokens: number;
+    isStale: boolean;
+    hasData: boolean;
+}
+
 export class ContextViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'cc-hud.context';
 
@@ -16,6 +22,49 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
     constructor(extensionUri: vscode.Uri, config: CCHudConfig) {
         this._extensionUri = extensionUri;
         this._config = config;
+    }
+
+    /**
+     * Get session stats from stats.json, with fallback to direct transcript reading
+     */
+    private _getSessionStats(): SessionStats {
+        const statsPath = getAbsolutePath(this._config.statsPath);
+        if (statsPath === undefined || statsPath === '') {
+            return { sessionTokens: 0, isStale: true, hasData: false };
+        }
+
+        try {
+            const statsContent = fs.readFileSync(statsPath, 'utf8');
+            const stats = JSON.parse(statsContent) as {
+                updatedAt?: string;
+                estimatedTokens?: number;
+                transcriptPath?: string;
+            };
+
+            // Check if data is stale (>5 min old)
+            const updatedAt = new Date(stats.updatedAt ?? 0);
+            const ageMs = Date.now() - updatedAt.getTime();
+            const isStale = ageMs > 5 * 60 * 1000;
+
+            let sessionTokens = stats.estimatedTokens ?? 0;
+
+            // If stale but we have transcript path, try direct read for fresh data
+            if (isStale && typeof stats.transcriptPath === 'string' && stats.transcriptPath !== '') {
+                try {
+                    const transcriptStats = fs.statSync(stats.transcriptPath);
+                    sessionTokens = Math.round(transcriptStats.size / 4);
+                    // Got fresh data from direct read
+                    return { sessionTokens, isStale: false, hasData: true };
+                } catch {
+                    // Transcript file not accessible, use cached value
+                }
+            }
+
+            return { sessionTokens, isStale, hasData: sessionTokens > 0 };
+        } catch {
+            // File doesn't exist or can't be read
+            return { sessionTokens: 0, isStale: true, hasData: false };
+        }
     }
 
     public resolveWebviewView(
@@ -94,17 +143,8 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // Get session stats
-        const statsPath = getAbsolutePath(this._config.statsPath);
-        let sessionTokens = 0;
-        if (statsPath !== undefined && statsPath !== '') {
-            try {
-                const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
-                sessionTokens = stats.estimatedTokens ?? 0;
-            } catch {
-                // ignore
-            }
-        }
+        // Get session stats (with direct transcript fallback)
+        const { sessionTokens } = this._getSessionStats();
 
         const totalTokens = sessionTokens + Math.round(planSize / 4) + Math.round(includedChars / 4);
         return Math.min(100, Math.round((totalTokens / this._config.contextTokenLimit) * 100));
@@ -189,18 +229,8 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // Get session stats from stats.json (written by sync-context hook)
-        const statsPathForSize = getAbsolutePath(this._config.statsPath);
-        let sessionTokens = 0;
-        if (statsPathForSize !== undefined && statsPathForSize !== '') {
-            try {
-                const statsContent = fs.readFileSync(statsPathForSize, 'utf8');
-                const stats = JSON.parse(statsContent);
-                sessionTokens = stats.estimatedTokens ?? 0;
-            } catch {
-                // File doesn't exist or can't be read
-            }
-        }
+        // Get session stats from stats.json (with direct transcript fallback)
+        const { sessionTokens, hasData: hasSessionData } = this._getSessionStats();
 
         // Total = session context + plan + pinned files
         const pinnedTokens = Math.round(includedChars / 4);
@@ -347,7 +377,9 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div class="meter-stats">
             ~${totalTokens.toLocaleString()} tokens / ${this._config.contextTokenLimit.toLocaleString()} limit
-            ${sessionTokens > 0 ? `<br>Session: ~${sessionTokens.toLocaleString()} tokens` : ''}
+            ${hasSessionData
+                ? `<br>Session: ~${sessionTokens.toLocaleString()} tokens`
+                : '<br><span style="opacity:0.6">Session: waiting for CC activity...</span>'}
             <br>Plan: ~${planTokens.toLocaleString()} tokens
             ${pinnedTokens > 0 ? `<br>Pinned: ~${pinnedTokens.toLocaleString()} tokens` : ''}
         </div>

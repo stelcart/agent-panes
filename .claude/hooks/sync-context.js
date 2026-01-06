@@ -31,9 +31,10 @@ process.stdin.on('end', () => {
         // Estimate tokens (chars / 4 is a common approximation)
         const estimatedTokens = Math.round(transcriptChars / 4);
 
-        // Write stats
+        // Write stats (include transcriptPath for direct reading fallback)
         const statsData = {
             sessionId: data.session_id || 'unknown',
+            transcriptPath: data.transcript_path || null,
             transcriptChars,
             estimatedTokens,
             lastTool: data.tool_name || 'unknown',

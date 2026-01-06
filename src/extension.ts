@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { initialize } from './initialize';
 import { TodoTreeProvider } from './providers/todoTreeProvider';
 import { PlanViewProvider } from './providers/planViewProvider';
@@ -10,8 +12,55 @@ import { invalidateCache } from './utils/fileCache';
 import { PinnedFileWatcher } from './pinnedFileWatcher';
 import { log, error, disposeLogger } from './utils/logger';
 
+/**
+ * Check if the project has the required CC HUD hooks configured
+ */
+function hasRequiredHooks(rootPath: string): boolean {
+    const settingsPath = path.join(rootPath, '.claude', 'settings.local.json');
+
+    try {
+        if (!fs.existsSync(settingsPath)) {
+            return false;
+        }
+
+        const content = fs.readFileSync(settingsPath, 'utf8');
+        const settings = JSON.parse(content) as {
+            hooks?: {
+                PostToolUse?: Array<{ hooks?: Array<{ command?: string }> }>;
+                SessionStart?: Array<{ hooks?: Array<{ command?: string }> }>;
+            };
+        };
+
+        // Check for sync-context hook in PostToolUse
+        const hasPostToolUseHook = settings.hooks?.PostToolUse?.some(
+            h => h.hooks?.some(hook => hook.command?.includes('sync-context.js') === true) === true
+        ) === true;
+
+        // Check for sync-context hook in SessionStart
+        const hasSessionStartHook = settings.hooks?.SessionStart?.some(
+            h => h.hooks?.some(hook => hook.command?.includes('sync-context.js') === true) === true
+        ) === true;
+
+        return hasPostToolUseHook && hasSessionStartHook;
+    } catch {
+        return false;
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const config = loadConfig();
+
+    // Auto-initialize if hooks are missing
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (workspaceFolder && !hasRequiredHooks(workspaceFolder.uri.fsPath)) {
+        log('CC HUD: Required hooks not found, auto-initializing...');
+        try {
+            await initialize(context);
+            log('CC HUD: Auto-initialization complete');
+        } catch (err) {
+            error('CC HUD: Auto-initialization failed:', err);
+        }
+    }
 
     // Move HUD to Secondary Side Bar on first activation
     const hasMovedToSecondarySidebar = context.globalState.get<boolean>('hasMovedToSecondarySidebar');

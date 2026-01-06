@@ -35,8 +35,13 @@ interface HookMatcher {
     hooks: HookCommand[];
 }
 
+interface HookEntry {
+    hooks: HookCommand[];
+}
+
 interface ClaudeHooks {
     PostToolUse?: HookMatcher[];
+    SessionStart?: HookEntry[];
 }
 
 interface ClaudeSettings {
@@ -236,9 +241,10 @@ process.stdin.on('end', () => {
         // Estimate tokens (chars / 4 is a common approximation)
         const estimatedTokens = Math.round(transcriptChars / 4);
 
-        // Write stats
+        // Write stats (include transcriptPath for direct reading fallback)
         const statsData = {
             sessionId: data.session_id || 'unknown',
+            transcriptPath: data.transcript_path || null,
             transcriptChars,
             estimatedTokens,
             lastTool: data.tool_name || 'unknown',
@@ -474,6 +480,24 @@ async function setupClaudeHook(rootPath: string): Promise<void> {
     if (existingContextHook === undefined) {
         settings.hooks.PostToolUse.push({
             matcher: ".*",
+            hooks: [
+                {
+                    type: "command",
+                    command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/sync-context.js\"",
+                    timeout: 5
+                }
+            ]
+        });
+    }
+
+    // Add SessionStart hook for sync-context (captures context on session start/resume)
+    settings.hooks.SessionStart ??= [];
+    const existingSessionStartHook = settings.hooks.SessionStart.find(
+        (h: HookEntry) => h.hooks?.some((hook: HookCommand) => hook.command?.includes('sync-context.js'))
+    );
+
+    if (existingSessionStartHook === undefined) {
+        settings.hooks.SessionStart.push({
             hooks: [
                 {
                     type: "command",
