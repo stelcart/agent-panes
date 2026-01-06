@@ -25,6 +25,83 @@ const DEFAULT_CONTEXT = {
     items: []
 };
 
+// Hook script that syncs TodoWrite tool output to .cc/plan.md
+const SYNC_PLAN_HOOK = `#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+// Read JSON input from stdin
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    try {
+        const data = JSON.parse(input);
+
+        // Only process TodoWrite tool
+        if (data.tool_name !== 'TodoWrite') {
+            process.exit(0);
+        }
+
+        const todos = data.tool_input?.todos;
+        if (!Array.isArray(todos)) {
+            process.exit(0);
+        }
+
+        // Convert todos to plan.md format
+        const statusMap = {
+            'pending': '[ ]',
+            'in_progress': '[>]',
+            'completed': '[x]'
+        };
+
+        let planContent = '# Plan\\n\\n## Current Tasks\\n';
+
+        for (const todo of todos) {
+            const checkbox = statusMap[todo.status] || '[ ]';
+            planContent += \`- \${checkbox} \${todo.content}\\n\`;
+        }
+
+        planContent += '\\n## Notes\\n- Auto-synced from Claude Code\\n';
+
+        // Write to .cc/plan.md
+        const projectDir = data.cwd || process.cwd();
+        const planPath = path.join(projectDir, '.cc', 'plan.md');
+
+        // Ensure .cc directory exists
+        const ccDir = path.dirname(planPath);
+        if (!fs.existsSync(ccDir)) {
+            fs.mkdirSync(ccDir, { recursive: true });
+        }
+
+        fs.writeFileSync(planPath, planContent);
+
+    } catch (err) {
+        // Silent fail - don't break Claude Code
+        console.error('CC HUD hook error:', err.message);
+    }
+    process.exit(0);
+});
+`;
+
+// Claude Code hook configuration
+const HOOK_SETTINGS = {
+    hooks: {
+        PostToolUse: [
+            {
+                matcher: "TodoWrite",
+                hooks: [
+                    {
+                        type: "command",
+                        command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/sync-plan.js\"",
+                        timeout: 10
+                    }
+                ]
+            }
+        ]
+    }
+};
+
 export async function initialize(_context: vscode.ExtensionContext) {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
@@ -74,10 +151,10 @@ export async function initialize(_context: vscode.ExtensionContext) {
         // 7. Create or merge .vscode/tasks.json
         await mergeTasksJson(vscodeDir);
 
-        vscode.window.showInformationMessage('CC HUD: Workspace initialized successfully!');
+        // 8. Set up Claude Code hook for TodoWrite sync
+        await setupClaudeHook(rootPath);
 
-        // Refresh views
-        vscode.commands.executeCommand('cc-hud.todo.refresh');
+        vscode.window.showInformationMessage('CC HUD: Workspace initialized successfully!');
 
     } catch (error) {
         vscode.window.showErrorMessage(`CC HUD: Initialization failed - ${error}`);
@@ -142,4 +219,60 @@ async function mergeTasksJson(vscodeDir: string) {
     }
 
     fs.writeFileSync(tasksPath, JSON.stringify(tasksJson, null, 2));
+}
+
+async function setupClaudeHook(rootPath: string) {
+    // 1. Create .claude/hooks/ directory
+    const claudeDir = path.join(rootPath, '.claude');
+    const hooksDir = path.join(claudeDir, 'hooks');
+
+    if (!fs.existsSync(hooksDir)) {
+        fs.mkdirSync(hooksDir, { recursive: true });
+    }
+
+    // 2. Write the hook script
+    const hookScriptPath = path.join(hooksDir, 'sync-plan.js');
+    fs.writeFileSync(hookScriptPath, SYNC_PLAN_HOOK);
+
+    // Make executable on Unix systems
+    try {
+        fs.chmodSync(hookScriptPath, 0o755);
+    } catch {
+        // Ignore chmod errors on Windows
+    }
+
+    // 3. Create or merge .claude/settings.local.json
+    const settingsPath = path.join(claudeDir, 'settings.local.json');
+    let settings: any = {};
+
+    if (fs.existsSync(settingsPath)) {
+        try {
+            const content = fs.readFileSync(settingsPath, 'utf8');
+            settings = JSON.parse(content);
+        } catch {
+            // If parsing fails, start fresh
+            settings = {};
+        }
+    }
+
+    // Merge hook settings
+    if (!settings.hooks) {
+        settings.hooks = {};
+    }
+
+    if (!settings.hooks.PostToolUse) {
+        settings.hooks.PostToolUse = [];
+    }
+
+    // Check if our hook already exists
+    const existingHook = settings.hooks.PostToolUse.find(
+        (h: any) => h.matcher === 'TodoWrite' &&
+            h.hooks?.some((hook: any) => hook.command?.includes('sync-plan.js'))
+    );
+
+    if (!existingHook) {
+        settings.hooks.PostToolUse.push(HOOK_SETTINGS.hooks.PostToolUse[0]);
+    }
+
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }

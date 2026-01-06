@@ -119,21 +119,24 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
             line-height: 1.5;
         }
         .toolbar {
-            margin-bottom: 10px;
-            padding-bottom: 10px;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
             border-bottom: 1px solid var(--vscode-panel-border);
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
         }
         button {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
+            background: transparent;
+            color: var(--vscode-textLink-foreground);
             border: none;
-            padding: 4px 8px;
-            margin-right: 5px;
+            padding: 2px 0;
             cursor: pointer;
-            border-radius: 2px;
+            font-size: 11px;
+            text-decoration: underline;
         }
         button:hover {
-            background: var(--vscode-button-hoverBackground);
+            color: var(--vscode-textLink-activeForeground);
         }
         .checkbox {
             cursor: pointer;
@@ -176,8 +179,8 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
     <div class="toolbar">
-        <button onclick="openPlanFile()">Open Plan File</button>
-        <button onclick="copyInstruction()">Copy Update Instruction</button>
+        <button onclick="openPlanFile()">Open File</button>
+        <button onclick="copyInstruction()">Copy Prompt</button>
     </div>
     <div class="content">
         ${htmlContent}

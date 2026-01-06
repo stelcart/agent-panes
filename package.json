@@ -21,6 +21,18 @@
       {
         "command": "cc-hud.pinCurrentFile",
         "title": "CC HUD: Pin Current File"
+      },
+      {
+        "command": "cc-hud.reset",
+        "title": "CC HUD: Reset & Reinitialize"
+      },
+      {
+        "command": "cc-hud.refresh",
+        "title": "CC HUD: Refresh Views"
+      },
+      {
+        "command": "cc-hud.syncFromCC",
+        "title": "CC HUD: Sync from Claude Code"
       }
     ],
     "viewsContainers": {
