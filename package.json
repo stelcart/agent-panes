@@ -1,0 +1,73 @@
+{
+  "name": "cc-hud",
+  "displayName": "CC HUD",
+  "description": "A HUD for working with Claude Code via the terminal, using files as the integration surface",
+  "version": "0.0.1",
+  "publisher": "cc-hud",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cc-hud.initialize",
+        "title": "CC HUD: Initialize in This Workspace"
+      },
+      {
+        "command": "cc-hud.pinCurrentFile",
+        "title": "CC HUD: Pin Current File"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cc-hud",
+          "title": "CC HUD",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "cc-hud": [
+        {
+          "id": "cc-hud.todo",
+          "name": "Todo",
+          "type": "tree"
+        },
+        {
+          "id": "cc-hud.plan",
+          "name": "Plan",
+          "type": "webview"
+        },
+        {
+          "id": "cc-hud.thinking",
+          "name": "Thinking",
+          "type": "webview"
+        },
+        {
+          "id": "cc-hud.context",
+          "name": "Context",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.3.0"
+  }
+}
