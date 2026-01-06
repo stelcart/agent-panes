@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { CCHudConfig, getAbsolutePath } from '../config';
-import { loadContext, saveContext, calculateContextPercent, ContextItem } from '../context';
+import { loadContext, saveContext, ContextItem } from '../context';
 import { escapeHtml } from '../utils/html';
 
 export class ContextViewProvider implements vscode.WebviewViewProvider {
@@ -73,7 +73,40 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
     }
 
     public async getContextPercent(): Promise<number> {
-        return calculateContextPercent(this._config.contextTokenLimit);
+        // Calculate pinned items size
+        const context = loadContext();
+        let includedChars = 0;
+        for (const item of context.items) {
+            if (item.included) {
+                includedChars += item.sizeChars;
+            }
+        }
+
+        // Get plan size
+        const planPath = getAbsolutePath(this._config.planPath);
+        let planSize = 0;
+        if (planPath) {
+            try {
+                planSize = fs.readFileSync(planPath, 'utf8').length;
+            } catch {
+                // ignore
+            }
+        }
+
+        // Get session stats
+        const statsPath = getAbsolutePath(this._config.statsPath);
+        let sessionTokens = 0;
+        if (statsPath) {
+            try {
+                const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+                sessionTokens = stats.estimatedTokens ?? 0;
+            } catch {
+                // ignore
+            }
+        }
+
+        const totalTokens = sessionTokens + Math.round(planSize / 4) + Math.round(includedChars / 4);
+        return Math.min(100, Math.round((totalTokens / this._config.contextTokenLimit) * 100));
     }
 
     private _toggleItem(index: number): void {
@@ -135,9 +168,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        const percent = calculateContextPercent(this._config.contextTokenLimit);
-
-        // Calculate totals
+        // Calculate pinned items size
         let includedChars = 0;
         for (const item of context.items) {
             if (item.included) {
@@ -145,7 +176,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // Add plan.md size
+        // Get plan.md size
         const planPath = getAbsolutePath(this._config.planPath);
         let planSize = 0;
         if (planPath) {
@@ -157,7 +188,24 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        const estimatedTokens = Math.round((includedChars + planSize) / 4);
+        // Get session stats from stats.json (written by sync-context hook)
+        const statsPath = getAbsolutePath(this._config.statsPath);
+        let sessionTokens = 0;
+        if (statsPath) {
+            try {
+                const statsContent = fs.readFileSync(statsPath, 'utf8');
+                const stats = JSON.parse(statsContent);
+                sessionTokens = stats.estimatedTokens ?? 0;
+            } catch {
+                // File doesn't exist or can't be read
+            }
+        }
+
+        // Total = session context + plan + pinned files
+        const pinnedTokens = Math.round(includedChars / 4);
+        const planTokens = Math.round(planSize / 4);
+        const totalTokens = sessionTokens + planTokens + pinnedTokens;
+        const percent = Math.min(100, Math.round((totalTokens / this._config.contextTokenLimit) * 100));
 
         // Determine the appropriate empty state message
         let emptyStateMessage: string;
@@ -297,9 +345,10 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             <div class="meter-fill ${percent < 50 ? 'low' : percent < 80 ? 'medium' : 'high'}" style="width: ${percent}%"></div>
         </div>
         <div class="meter-stats">
-            ~${estimatedTokens.toLocaleString()} tokens / ${this._config.contextTokenLimit.toLocaleString()} limit
-            <br>
-            Plan: ~${Math.round(planSize / 4).toLocaleString()} tokens
+            ~${totalTokens.toLocaleString()} tokens / ${this._config.contextTokenLimit.toLocaleString()} limit
+            ${sessionTokens > 0 ? `<br>Session: ~${sessionTokens.toLocaleString()} tokens` : ''}
+            <br>Plan: ~${planTokens.toLocaleString()} tokens
+            ${pinnedTokens > 0 ? `<br>Pinned: ~${pinnedTokens.toLocaleString()} tokens` : ''}
         </div>
     </div>
     <h3>Pinned Items</h3>

@@ -39,12 +39,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('cc-hud.initialize', () => initialize(context))
     );
 
-    // Register pin file command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('cc-hud.pinCurrentFile', () => pinCurrentFile())
-    );
-
-    // Create providers (before registering reset command so we can reference them)
+    // Create providers (before registering commands so we can reference them)
     const todoProvider = new TodoTreeProvider(config);
     const planProvider = new PlanViewProvider(context.extensionUri, config);
     const thinkingProvider = new ThinkingViewProvider(context.extensionUri, config);
@@ -72,6 +67,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     statusBarItem.tooltip = 'Claude Code HUD - Context Usage';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
+
+    // Register pin file command - explicitly refresh after pinning
+    context.subscriptions.push(
+        vscode.commands.registerCommand('cc-hud.pinCurrentFile', async () => {
+            await pinCurrentFile();
+            // Explicitly refresh after pinning to avoid race conditions with file watcher
+            contextProvider.refresh();
+            void updateStatusBar(statusBarItem, contextProvider);
+        })
+    );
 
     // Register reset command - clears state, reinitializes, and refreshes all views
     context.subscriptions.push(
@@ -219,6 +224,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     contextWatcher.onDidChange(handleContextChange);
     contextWatcher.onDidCreate(handleContextChange);
     context.subscriptions.push(contextWatcher);
+
+    // Watch for stats.json changes (session context tracking from sync-context hook)
+    let statsDebounceTimer: NodeJS.Timeout | undefined;
+    const statsWatcher = vscode.workspace.createFileSystemWatcher('**/.cc/stats.json');
+    const handleStatsChange = (_uri: vscode.Uri): void => {
+        if (statsDebounceTimer) {
+            clearTimeout(statsDebounceTimer);
+        }
+        statsDebounceTimer = setTimeout(() => {
+            try {
+                contextProvider.refresh();
+                void updateStatusBar(statusBarItem, contextProvider);
+            } catch (error) {
+                console.error('CC HUD: Error handling stats file change:', error);
+            }
+        }, DEBOUNCE_DELAY);
+    };
+    statsWatcher.onDidChange(handleStatsChange);
+    statsWatcher.onDidCreate(handleStatsChange);
+    context.subscriptions.push(statsWatcher);
 
     // Initial status bar update
     void updateStatusBar(statusBarItem, contextProvider);

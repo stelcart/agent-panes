@@ -13,6 +13,8 @@ export interface CCHudConfig {
     logPath: string;
     /** Relative path to the context JSON file */
     contextPath: string;
+    /** Relative path to the session stats JSON file */
+    statsPath: string;
     /** Maximum token limit for context (must be positive) */
     contextTokenLimit: number;
     /** Number of lines to tail from thinking log */
@@ -27,6 +29,7 @@ interface RawFileConfig {
     planPath?: unknown;
     logPath?: unknown;
     contextPath?: unknown;
+    statsPath?: unknown;
     contextTokenLimit?: unknown;
     thinkingTailLines?: unknown;
 }
@@ -43,6 +46,7 @@ export const defaultConfig: CCHudConfig = {
     planPath: '.cc/plan.md',
     logPath: '.cc/cc.log',
     contextPath: '.cc/context.json',
+    statsPath: '.cc/stats.json',
     contextTokenLimit: 200000,
     thinkingTailLines: 500
 };
@@ -112,8 +116,8 @@ function validateConfig(rawConfig: RawFileConfig): CCHudConfig {
     const validatedConfig: Partial<CCHudConfig> = {};
 
     // Validate path fields
-    const pathFields: (keyof Pick<CCHudConfig, 'planPath' | 'logPath' | 'contextPath'>)[] =
-        ['planPath', 'logPath', 'contextPath'];
+    const pathFields: (keyof Pick<CCHudConfig, 'planPath' | 'logPath' | 'contextPath' | 'statsPath'>)[] =
+        ['planPath', 'logPath', 'contextPath', 'statsPath'];
 
     for (const field of pathFields) {
         const result = validatePath(rawConfig[field], field);

@@ -202,6 +202,58 @@ process.stdin.on('end', () => {
 });
 `;
 
+// Hook script that syncs context/token stats to .cc/stats.json
+const SYNC_CONTEXT_HOOK = `#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    try {
+        const data = JSON.parse(input);
+        const projectDir = data.cwd || process.cwd();
+        const statsPath = path.join(projectDir, '.cc', 'stats.json');
+
+        // Ensure .cc directory exists
+        const ccDir = path.dirname(statsPath);
+        if (!fs.existsSync(ccDir)) {
+            fs.mkdirSync(ccDir, { recursive: true });
+        }
+
+        // Read transcript to estimate context size
+        let transcriptChars = 0;
+        if (data.transcript_path && fs.existsSync(data.transcript_path)) {
+            try {
+                const stats = fs.statSync(data.transcript_path);
+                transcriptChars = stats.size;
+            } catch (e) {
+                // Ignore errors reading transcript
+            }
+        }
+
+        // Estimate tokens (chars / 4 is a common approximation)
+        const estimatedTokens = Math.round(transcriptChars / 4);
+
+        // Write stats
+        const statsData = {
+            sessionId: data.session_id || 'unknown',
+            transcriptChars,
+            estimatedTokens,
+            lastTool: data.tool_name || 'unknown',
+            updatedAt: new Date().toISOString()
+        };
+
+        fs.writeFileSync(statsPath, JSON.stringify(statsData, null, 2));
+
+    } catch (err) {
+        // Silent fail
+    }
+    process.exit(0);
+});
+`;
+
 // Claude Code hook configuration
 const HOOK_SETTINGS: ClaudeSettings = {
     hooks: {
@@ -353,10 +405,14 @@ async function setupClaudeHook(rootPath: string): Promise<void> {
     const logActivityPath = path.join(hooksDir, 'log-activity.js');
     fs.writeFileSync(logActivityPath, LOG_ACTIVITY_HOOK);
 
+    const syncContextPath = path.join(hooksDir, 'sync-context.js');
+    fs.writeFileSync(syncContextPath, SYNC_CONTEXT_HOOK);
+
     // Make executable on Unix systems
     try {
         fs.chmodSync(syncPlanPath, 0o755);
         fs.chmodSync(logActivityPath, 0o755);
+        fs.chmodSync(syncContextPath, 0o755);
     } catch {
         // Ignore chmod errors on Windows
     }
@@ -404,6 +460,24 @@ async function setupClaudeHook(rootPath: string): Promise<void> {
                 {
                     type: "command",
                     command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/log-activity.js\"",
+                    timeout: 5
+                }
+            ]
+        });
+    }
+
+    // Add sync-context hook if not exists (matches all tools to track context usage)
+    const existingContextHook = settings.hooks.PostToolUse.find(
+        (h: HookMatcher) => h.hooks?.some((hook: HookCommand) => hook.command?.includes('sync-context.js'))
+    );
+
+    if (existingContextHook === undefined) {
+        settings.hooks.PostToolUse.push({
+            matcher: ".*",
+            hooks: [
+                {
+                    type: "command",
+                    command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/sync-context.js\"",
                     timeout: 5
                 }
             ]
