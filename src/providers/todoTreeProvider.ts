@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { CCHudConfig, getAbsolutePath } from '../config';
-import { parsePlan, TodoItem, getStatusIcon } from '../planParser';
+import { parsePlan, TodoItem } from '../planParser';
 
 export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<TodoTreeItem | undefined | null | void> = new vscode.EventEmitter<TodoTreeItem | undefined | null | void>();

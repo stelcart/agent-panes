@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { CCHudConfig, getAbsolutePath } from '../config';
 import { toggleCheckbox } from '../planParser';
-import { escapeHtml } from '../utils/html';
+import { renderMarkdownToHtml } from '../utils/markdown';
 
 export class PlanViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'cc-hud.plan';
@@ -18,9 +19,9 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
+        _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
-    ) {
+    ): void {
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -49,13 +50,13 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    public refresh() {
+    public refresh(): void {
         if (this._view) {
             this._view.webview.html = this._getHtmlContent();
         }
     }
 
-    private async _toggleCheckbox(line: number) {
+    private async _toggleCheckbox(line: number): Promise<void> {
         const planPath = getAbsolutePath(this._config.planPath);
         if (!planPath) {
             return;
@@ -67,26 +68,33 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
             fs.writeFileSync(planPath, newContent);
             this.refresh();
         } catch (error) {
-            vscode.window.showErrorMessage('CC HUD: Failed to update plan file');
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`CC HUD: Failed to update plan file: ${errorMessage}`);
         }
     }
 
-    private async _openPlanFile() {
+    private async _openPlanFile(): Promise<void> {
         const planPath = getAbsolutePath(this._config.planPath);
-        if (planPath) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(planPath);
-                await vscode.window.showTextDocument(doc);
-            } catch (error) {
-                vscode.window.showErrorMessage('CC HUD: Failed to open plan file');
-            }
+        if (!planPath) {
+            return;
+        }
+        try {
+            const doc = await vscode.workspace.openTextDocument(planPath);
+            await vscode.window.showTextDocument(doc);
+        } catch {
+            vscode.window.showErrorMessage('CC HUD: Failed to open plan file');
         }
     }
 
-    private async _copyInstruction() {
-        const instruction = `Please update .cc/plan.md to reflect the current progress. Mark completed tasks with [x], in-progress tasks with [>], and blocked tasks with [!]. Keep the file structure intact.`;
-        await vscode.env.clipboard.writeText(instruction);
-        vscode.window.showInformationMessage('CC HUD: Instruction copied to clipboard');
+    private async _copyInstruction(): Promise<void> {
+        try {
+            const instruction = `Please update .cc/plan.md to reflect the current progress. Mark completed tasks with [x], in-progress tasks with [>], and blocked tasks with [!]. Keep the file structure intact.`;
+            await vscode.env.clipboard.writeText(instruction);
+            vscode.window.showInformationMessage('CC HUD: Instruction copied to clipboard');
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`CC HUD: Failed to copy instruction to clipboard: ${errorMessage}`);
+        }
     }
 
     private _getHtmlContent(): string {
@@ -96,20 +104,23 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
         if (planPath) {
             try {
                 markdownContent = fs.readFileSync(planPath, 'utf8');
-            } catch (error) {
+            } catch {
                 // File doesn't exist or can't be read, use default message
             }
         }
 
+        // Generate nonce for CSP
+        const nonce = crypto.randomBytes(16).toString('base64');
+
         // Convert markdown to HTML with clickable checkboxes
-        const htmlContent = this._renderMarkdown(markdownContent);
+        const htmlContent = renderMarkdownToHtml(markdownContent, { onCheckboxClick: 'toggleCheckbox' });
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>
         body {
             font-family: var(--vscode-font-family);
@@ -240,7 +251,7 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
     <div class="content">
         ${htmlContent}
     </div>
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
 
         function toggleCheckbox(line) {
@@ -257,255 +268,5 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
     </script>
 </body>
 </html>`;
-    }
-
-    private _renderMarkdown(content: string): string {
-        const lines = content.split('\n');
-        let html = '';
-        let inList = false;
-        let listStack: number[] = [];
-        let inCodeBlock = false;
-        let codeBlockContent = '';
-        let inTable = false;
-        let tableLines: string[] = [];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const lineNum = i + 1;
-
-            // Code blocks
-            if (line.startsWith('```')) {
-                if (inCodeBlock) {
-                    html += `<pre><code>${escapeHtml(codeBlockContent.trim())}</code></pre>`;
-                    codeBlockContent = '';
-                    inCodeBlock = false;
-                } else {
-                    if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                    inCodeBlock = true;
-                }
-                continue;
-            }
-
-            if (inCodeBlock) {
-                codeBlockContent += line + '\n';
-                continue;
-            }
-
-            // Table rows (lines with | that aren't in code blocks)
-            const isTableRow = line.includes('|') && line.trim().startsWith('|');
-            if (isTableRow) {
-                if (!inTable) {
-                    if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                    inTable = true;
-                    tableLines = [];
-                }
-                tableLines.push(line);
-                continue;
-            } else if (inTable) {
-                // End of table - render it
-                html += this._renderTable(tableLines);
-                inTable = false;
-                tableLines = [];
-            }
-
-            // Horizontal rule
-            if (line.match(/^(-{3,}|_{3,}|\*{3,})$/)) {
-                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += '<hr>';
-                continue;
-            }
-
-            // Headers
-            if (line.startsWith('# ')) {
-                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h1>${this._formatInlineMarkdown(line.slice(2))}</h1>`;
-                continue;
-            }
-            if (line.startsWith('## ')) {
-                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h2>${this._formatInlineMarkdown(line.slice(3))}</h2>`;
-                continue;
-            }
-            if (line.startsWith('### ')) {
-                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h3>${this._formatInlineMarkdown(line.slice(4))}</h3>`;
-                continue;
-            }
-            if (line.startsWith('#### ')) {
-                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h4>${this._formatInlineMarkdown(line.slice(5))}</h4>`;
-                continue;
-            }
-
-            // Blockquotes
-            if (line.startsWith('> ')) {
-                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<blockquote>${this._formatInlineMarkdown(line.slice(2))}</blockquote>`;
-                continue;
-            }
-
-            // Checkbox items
-            const checkboxMatch = line.match(/^(\s*)-\s*\[([ x~>!])\]\s*(.+)$/);
-            if (checkboxMatch) {
-                const indent = checkboxMatch[1].length;
-                const status = checkboxMatch[2];
-                const text = checkboxMatch[3];
-
-                if (!inList) {
-                    html += '<ul>';
-                    inList = true;
-                    listStack.push(indent);
-                } else {
-                    while (listStack.length > 0 && listStack[listStack.length - 1] > indent) {
-                        html += '</ul></li>';
-                        listStack.pop();
-                    }
-                    if (listStack.length === 0 || listStack[listStack.length - 1] < indent) {
-                        html += '<ul>';
-                        listStack.push(indent);
-                    }
-                }
-
-                const statusClass = status === 'x' ? 'done' : (status === '>' || status === '~') ? 'in-progress' : status === '!' ? 'blocked' : '';
-                const checkboxChar = status === 'x' ? '&#9745;' : (status === '>' || status === '~') ? '&#9655;' : status === '!' ? '&#9888;' : '&#9744;';
-
-                html += `<li class="${statusClass}"><span class="checkbox" onclick="toggleCheckbox(${lineNum})">${checkboxChar}</span> ${this._formatInlineMarkdown(text)}`;
-                continue;
-            }
-
-            // Regular list items
-            const listMatch = line.match(/^(\s*)-\s+(.+)$/);
-            if (listMatch) {
-                const indent = listMatch[1].length;
-                const text = listMatch[2];
-
-                if (!inList) {
-                    html += '<ul>';
-                    inList = true;
-                    listStack.push(indent);
-                }
-
-                html += `<li>${this._formatInlineMarkdown(text)}</li>`;
-                continue;
-            }
-
-            // Numbered list items
-            const numberedMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
-            if (numberedMatch) {
-                const text = numberedMatch[2];
-                if (!inList) {
-                    html += '<ol>';
-                    inList = true;
-                    listStack.push(0);
-                }
-                html += `<li>${this._formatInlineMarkdown(text)}</li>`;
-                continue;
-            }
-
-            // Empty lines close lists
-            if (line.trim() === '') {
-                if (inList) {
-                    html += this._closeList(listStack);
-                    inList = false;
-                    listStack = [];
-                }
-                html += '<br>';
-                continue;
-            }
-
-            // Regular paragraphs
-            if (inList) {
-                html += this._closeList(listStack);
-                inList = false;
-                listStack = [];
-            }
-            html += `<p>${this._formatInlineMarkdown(line)}</p>`;
-        }
-
-        if (inList) {
-            html += this._closeList(listStack);
-        }
-
-        if (inTable) {
-            html += this._renderTable(tableLines);
-        }
-
-        return html;
-    }
-
-    private _renderTable(lines: string[]): string {
-        if (lines.length < 2) {
-            // Not a valid table (need at least header + separator)
-            return lines.map(l => `<p>${this._formatInlineMarkdown(l)}</p>`).join('');
-        }
-
-        // Parse cells from a line
-        const parseCells = (line: string): string[] => {
-            return line.split('|')
-                .slice(1, -1) // Remove empty first/last from | at start/end
-                .map(cell => cell.trim());
-        };
-
-        // Check if second line is a separator (contains only -, :, |, and spaces)
-        const separatorLine = lines[1].trim();
-        const isSeparator = /^\|[\s\-:|]+\|$/.test(separatorLine);
-
-        if (!isSeparator) {
-            // Not a valid table
-            return lines.map(l => `<p>${this._formatInlineMarkdown(l)}</p>`).join('');
-        }
-
-        const headerCells = parseCells(lines[0]);
-        const dataRows = lines.slice(2).map(parseCells);
-
-        let tableHtml = '<table><thead><tr>';
-        for (const cell of headerCells) {
-            tableHtml += `<th>${this._formatInlineMarkdown(cell)}</th>`;
-        }
-        tableHtml += '</tr></thead><tbody>';
-
-        for (const row of dataRows) {
-            tableHtml += '<tr>';
-            for (let i = 0; i < headerCells.length; i++) {
-                const cellContent = row[i] || '';
-                tableHtml += `<td>${this._formatInlineMarkdown(cellContent)}</td>`;
-            }
-            tableHtml += '</tr>';
-        }
-
-        tableHtml += '</tbody></table>';
-        return tableHtml;
-    }
-
-    private _closeList(stack: number[]): string {
-        let html = '';
-        for (let i = 0; i < stack.length; i++) {
-            html += '</li></ul>';
-        }
-        return html;
-    }
-
-    private _formatInlineMarkdown(text: string): string {
-        // First escape HTML
-        let result = escapeHtml(text);
-
-        // Bold: **text** or __text__
-        result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        result = result.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-
-        // Italic: *text* or _text_ (but not inside words)
-        result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        result = result.replace(/(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])/g, '<em>$1</em>');
-
-        // Inline code: `text`
-        result = result.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-        // Links: [text](url)
-        result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" title="$2">$1</a>');
-
-        // Strikethrough: ~~text~~
-        result = result.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-
-        return result;
     }
 }

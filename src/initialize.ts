@@ -3,6 +3,46 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { defaultConfig } from './config';
 
+// Type definitions for VS Code tasks.json
+interface VsCodeTask {
+    label: string;
+    type: string;
+    command: string;
+    osx?: { command: string };
+    linux?: { command: string };
+    windows?: { command: string };
+    problemMatcher: string[];
+    presentation?: {
+        reveal: string;
+        panel: string;
+    };
+}
+
+interface TasksJson {
+    version: string;
+    tasks: VsCodeTask[];
+}
+
+// Type definitions for Claude Code settings
+interface HookCommand {
+    type: string;
+    command: string;
+    timeout: number;
+}
+
+interface HookMatcher {
+    matcher: string;
+    hooks: HookCommand[];
+}
+
+interface ClaudeHooks {
+    PostToolUse?: HookMatcher[];
+}
+
+interface ClaudeSettings {
+    hooks?: ClaudeHooks;
+}
+
 const PLAN_TEMPLATE = `# Plan
 
 ## Objective
@@ -163,7 +203,7 @@ process.stdin.on('end', () => {
 `;
 
 // Claude Code hook configuration
-const HOOK_SETTINGS = {
+const HOOK_SETTINGS: ClaudeSettings = {
     hooks: {
         PostToolUse: [
             {
@@ -180,7 +220,7 @@ const HOOK_SETTINGS = {
     }
 };
 
-export async function initialize(_context: vscode.ExtensionContext) {
+export async function initialize(_context: vscode.ExtensionContext): Promise<void> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('CC HUD: Please open a workspace folder first.');
@@ -239,10 +279,10 @@ export async function initialize(_context: vscode.ExtensionContext) {
     }
 }
 
-async function mergeTasksJson(vscodeDir: string) {
+async function mergeTasksJson(vscodeDir: string): Promise<void> {
     const tasksPath = path.join(vscodeDir, 'tasks.json');
 
-    const ccTask = {
+    const ccTask: VsCodeTask = {
         label: 'Claude Code (logged)',
         type: 'shell',
         command: '',
@@ -262,27 +302,25 @@ async function mergeTasksJson(vscodeDir: string) {
         }
     };
 
-    let tasksJson: { version: string; tasks: any[] };
+    let tasksJson: TasksJson;
 
     if (fs.existsSync(tasksPath)) {
         try {
             const content = fs.readFileSync(tasksPath, 'utf8');
-            tasksJson = JSON.parse(content);
+            tasksJson = JSON.parse(content) as TasksJson;
 
             // Check if task already exists
             const existingTask = tasksJson.tasks?.find(
-                (t: any) => t.label === 'Claude Code (logged)'
+                (t: VsCodeTask) => t.label === 'Claude Code (logged)'
             );
 
-            if (existingTask) {
+            if (existingTask !== undefined) {
                 return; // Task already exists, don't modify
             }
 
-            if (!tasksJson.tasks) {
-                tasksJson.tasks = [];
-            }
+            tasksJson.tasks ??= [];
             tasksJson.tasks.push(ccTask);
-        } catch (error) {
+        } catch {
             // If parsing fails, create new file
             tasksJson = {
                 version: '2.0.0',
@@ -299,7 +337,7 @@ async function mergeTasksJson(vscodeDir: string) {
     fs.writeFileSync(tasksPath, JSON.stringify(tasksJson, null, 2));
 }
 
-async function setupClaudeHook(rootPath: string) {
+async function setupClaudeHook(rootPath: string): Promise<void> {
     // 1. Create .claude/hooks/ directory
     const claudeDir = path.join(rootPath, '.claude');
     const hooksDir = path.join(claudeDir, 'hooks');
@@ -325,12 +363,12 @@ async function setupClaudeHook(rootPath: string) {
 
     // 3. Create or merge .claude/settings.local.json
     const settingsPath = path.join(claudeDir, 'settings.local.json');
-    let settings: any = {};
+    let settings: ClaudeSettings = {};
 
     if (fs.existsSync(settingsPath)) {
         try {
             const content = fs.readFileSync(settingsPath, 'utf8');
-            settings = JSON.parse(content);
+            settings = JSON.parse(content) as ClaudeSettings;
         } catch {
             // If parsing fails, start fresh
             settings = {};
@@ -338,30 +376,28 @@ async function setupClaudeHook(rootPath: string) {
     }
 
     // Merge hook settings
-    if (!settings.hooks) {
-        settings.hooks = {};
-    }
-
-    if (!settings.hooks.PostToolUse) {
-        settings.hooks.PostToolUse = [];
-    }
+    settings.hooks ??= {};
+    settings.hooks.PostToolUse ??= [];
 
     // Add sync-plan hook if not exists
     const existingSyncHook = settings.hooks.PostToolUse.find(
-        (h: any) => h.matcher === 'TodoWrite' &&
-            h.hooks?.some((hook: any) => hook.command?.includes('sync-plan.js'))
+        (h: HookMatcher) => h.matcher === 'TodoWrite' &&
+            h.hooks?.some((hook: HookCommand) => hook.command?.includes('sync-plan.js'))
     );
 
-    if (!existingSyncHook) {
-        settings.hooks.PostToolUse.push(HOOK_SETTINGS.hooks.PostToolUse[0]);
+    if (existingSyncHook === undefined) {
+        const syncPlanHook = HOOK_SETTINGS.hooks?.PostToolUse?.[0];
+        if (syncPlanHook !== undefined) {
+            settings.hooks.PostToolUse.push(syncPlanHook);
+        }
     }
 
     // Add log-activity hook if not exists (matches all tools except TodoWrite)
     const existingLogHook = settings.hooks.PostToolUse.find(
-        (h: any) => h.hooks?.some((hook: any) => hook.command?.includes('log-activity.js'))
+        (h: HookMatcher) => h.hooks?.some((hook: HookCommand) => hook.command?.includes('log-activity.js'))
     );
 
-    if (!existingLogHook) {
+    if (existingLogHook === undefined) {
         settings.hooks.PostToolUse.push({
             matcher: ".*",
             hooks: [

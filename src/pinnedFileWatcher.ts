@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { getAbsolutePath } from './config';
 import { getPinnedFilePaths, updateSingleFileSizeByPath } from './context';
 
@@ -55,7 +54,7 @@ export class PinnedFileWatcher implements vscode.Disposable {
      */
     private addWatcher(relativePath: string): void {
         const absolutePath = getAbsolutePath(relativePath);
-        if (!absolutePath) {
+        if (absolutePath === undefined || absolutePath === '') {
             return;
         }
 
@@ -70,7 +69,7 @@ export class PinnedFileWatcher implements vscode.Disposable {
         const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
         // Handle file changes with debouncing
-        const handleFileEvent = () => {
+        const handleFileEvent = (): void => {
             this.debouncedUpdate(relativePath);
         };
 

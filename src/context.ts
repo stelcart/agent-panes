@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getAbsolutePath } from './config';
+import { getAbsolutePath, getWorkspaceRoot } from './config';
 
 export interface ContextItem {
     type: 'file' | 'snippet' | 'note';
@@ -16,9 +16,34 @@ export interface ContextData {
     items: ContextItem[];
 }
 
+/**
+ * Validates that an item has the required ContextItem fields.
+ * @param item The item to validate
+ * @returns True if the item is a valid ContextItem
+ */
+function isValidContextItem(item: unknown): item is ContextItem {
+    if (item === null || item === undefined || typeof item !== 'object') {
+        return false;
+    }
+    const obj = item as Record<string, unknown>;
+
+    // Required fields: type, included, sizeChars
+    if (!('type' in obj) || !['file', 'snippet', 'note'].includes(obj.type as string)) {
+        return false;
+    }
+    if (!('included' in obj) || typeof obj.included !== 'boolean') {
+        return false;
+    }
+    if (!('sizeChars' in obj) || typeof obj.sizeChars !== 'number') {
+        return false;
+    }
+
+    return true;
+}
+
 export function loadContext(): ContextData {
     const contextPath = getAbsolutePath('.cc/context.json');
-    if (!contextPath) {
+    if (contextPath === undefined || contextPath === '') {
         return { items: [] };
     }
 
@@ -26,26 +51,44 @@ export function loadContext(): ContextData {
         const content = fs.readFileSync(contextPath, 'utf8');
         const parsed = JSON.parse(content);
         // Validate that result has items array
-        if (!parsed || !Array.isArray(parsed.items)) {
+        if (parsed === null || parsed === undefined || !Array.isArray(parsed.items)) {
+            console.warn('CC HUD: context.json does not have a valid items array');
             return { items: [] };
         }
-        return parsed;
+
+        // Filter out invalid items and log warnings
+        const validItems: ContextItem[] = [];
+        for (let i = 0; i < parsed.items.length; i++) {
+            if (isValidContextItem(parsed.items[i])) {
+                validItems.push(parsed.items[i]);
+            } else {
+                console.warn(`CC HUD: Invalid context item at index ${i}, skipping:`, parsed.items[i]);
+            }
+        }
+
+        return { items: validItems };
     } catch (error) {
-        // File doesn't exist or can't be read/parsed, return default
+        // Only log if it's not a "file not found" error
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error('CC HUD: Failed to load context.json:', error);
+        }
         return { items: [] };
     }
 }
 
-export function saveContext(data: ContextData): void {
+export function saveContext(data: ContextData): boolean {
     const contextPath = getAbsolutePath('.cc/context.json');
-    if (!contextPath) {
-        return;
+    if (contextPath === undefined || contextPath === '') {
+        console.warn('CC HUD: Cannot save context - no workspace folder found');
+        return false;
     }
 
     try {
         fs.writeFileSync(contextPath, JSON.stringify(data, null, 2));
+        return true;
     } catch (error) {
-        console.error('Failed to save context:', error);
+        console.error('CC HUD: Failed to save context:', error);
+        return false;
     }
 }
 
@@ -56,14 +99,14 @@ export async function pinCurrentFile(): Promise<void> {
         return;
     }
 
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) {
+    const workspaceRoot = getWorkspaceRoot();
+    if (workspaceRoot === undefined || workspaceRoot === '') {
         vscode.window.showErrorMessage('CC HUD: No workspace folder found.');
         return;
     }
 
     const filePath = editor.document.uri.fsPath;
-    const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath);
+    const relativePath = path.relative(workspaceRoot, filePath);
 
     // Don't pin files from .cc/ directory
     if (relativePath.startsWith('.cc')) {
@@ -110,9 +153,9 @@ export function updatePinnedFileSizes(): { updated: string[]; deleted: string[] 
     let hasChanges = false;
 
     for (const item of context.items) {
-        if (item.type === 'file' && item.path) {
+        if (item.type === 'file' && item.path !== undefined && item.path !== '') {
             const absolutePath = getAbsolutePath(item.path);
-            if (!absolutePath) {
+            if (absolutePath === undefined || absolutePath === '') {
                 continue;
             }
 
@@ -126,7 +169,7 @@ export function updatePinnedFileSizes(): { updated: string[]; deleted: string[] 
                     hasChanges = true;
                     updated.push(item.path);
                 }
-            } catch (error) {
+            } catch {
                 // File doesn't exist or can't be read
                 if (item.sizeChars !== 0) {
                     item.sizeChars = 0;
@@ -157,12 +200,12 @@ export function updateSingleFileSizeByPath(filePath: string): boolean {
         i => i.type === 'file' && i.path === filePath
     );
 
-    if (!item || !item.path) {
+    if (item?.path === undefined || item.path === '') {
         return false;
     }
 
     const absolutePath = getAbsolutePath(item.path);
-    if (!absolutePath) {
+    if (absolutePath === undefined || absolutePath === '') {
         return false;
     }
 
@@ -176,7 +219,7 @@ export function updateSingleFileSizeByPath(filePath: string): boolean {
             saveContext(context);
             return true;
         }
-    } catch (error) {
+    } catch {
         // File doesn't exist or can't be read - mark as 0 size
         if (item.sizeChars !== 0) {
             item.sizeChars = 0;
@@ -195,11 +238,17 @@ export function updateSingleFileSizeByPath(filePath: string): boolean {
 export function getPinnedFilePaths(): string[] {
     const context = loadContext();
     return context.items
-        .filter(item => item.type === 'file' && item.path)
+        .filter(item => item.type === 'file' && item.path !== undefined && item.path !== '')
         .map(item => item.path!);
 }
 
 export function calculateContextPercent(contextTokenLimit: number): number {
+    // Guard against division by zero or negative values
+    if (!Number.isFinite(contextTokenLimit) || contextTokenLimit <= 0) {
+        console.warn(`CC HUD: Invalid contextTokenLimit (${contextTokenLimit}), returning 0%`);
+        return 0;
+    }
+
     const context = loadContext();
     const planPath = getAbsolutePath('.cc/plan.md');
 
@@ -213,12 +262,15 @@ export function calculateContextPercent(contextTokenLimit: number): number {
     }
 
     // Add plan.md size
-    if (planPath) {
+    if (planPath !== undefined && planPath !== '') {
         try {
             const planContent = fs.readFileSync(planPath, 'utf8');
             totalChars += planContent.length;
         } catch (error) {
-            // File doesn't exist or can't be read, ignore
+            // Only log if it's not a "file not found" error
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                console.error('CC HUD: Failed to read plan.md for context calculation:', error);
+            }
         }
     }
 

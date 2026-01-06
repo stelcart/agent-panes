@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { CCHudConfig, getAbsolutePath } from '../config';
 import { loadContext, saveContext, calculateContextPercent, ContextItem } from '../context';
 import { escapeHtml } from '../utils/html';
@@ -18,9 +19,9 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
+        _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
-    ) {
+    ): void {
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -36,13 +37,23 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
                 case 'toggleItem':
                     // Validate that index is a non-negative integer
                     if (typeof message.index === 'number' && Number.isInteger(message.index) && message.index >= 0) {
-                        this._toggleItem(message.index);
+                        try {
+                            this._toggleItem(message.index);
+                        } catch (error) {
+                            console.error('CC HUD: Error toggling item:', error);
+                            vscode.window.showErrorMessage('CC HUD: Failed to toggle item. Check the console for details.');
+                        }
                     }
                     break;
                 case 'removeItem':
                     // Validate that index is a non-negative integer
                     if (typeof message.index === 'number' && Number.isInteger(message.index) && message.index >= 0) {
-                        this._removeItem(message.index);
+                        try {
+                            this._removeItem(message.index);
+                        } catch (error) {
+                            console.error('CC HUD: Error removing item:', error);
+                            vscode.window.showErrorMessage('CC HUD: Failed to remove item. Check the console for details.');
+                        }
                     }
                     break;
                 case 'openFile':
@@ -55,7 +66,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    public refresh() {
+    public refresh(): void {
         if (this._view) {
             this._view.webview.html = this._getHtmlContent();
         }
@@ -65,16 +76,17 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         return calculateContextPercent(this._config.contextTokenLimit);
     }
 
-    private _toggleItem(index: number) {
+    private _toggleItem(index: number): void {
         const context = loadContext();
-        if (index >= 0 && index < context.items.length) {
-            context.items[index].included = !context.items[index].included;
+        const item = context.items[index];
+        if (index >= 0 && index < context.items.length && item) {
+            item.included = !item.included;
             saveContext(context);
             this.refresh();
         }
     }
 
-    private _removeItem(index: number) {
+    private _removeItem(index: number): void {
         const context = loadContext();
         if (index >= 0 && index < context.items.length) {
             context.items.splice(index, 1);
@@ -83,27 +95,51 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async _openFile(filePath: string) {
+    private async _openFile(filePath: string): Promise<void> {
         const absolutePath = getAbsolutePath(filePath);
-        if (absolutePath) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(absolutePath);
-                await vscode.window.showTextDocument(doc);
-            } catch (error) {
-                vscode.window.showWarningMessage(`CC HUD: File not found: ${filePath}`);
-            }
+        if (!absolutePath) {
+            return;
+        }
+        try {
+            const doc = await vscode.workspace.openTextDocument(absolutePath);
+            await vscode.window.showTextDocument(doc);
+        } catch {
+            vscode.window.showWarningMessage(`CC HUD: File not found: ${filePath}`);
         }
     }
 
     private _getHtmlContent(): string {
-        const context = loadContext();
+        // Generate nonce for CSP
+        const nonce = crypto.randomBytes(16).toString('base64');
+
+        // Load context with error detection
+        let context: { items: import('../context').ContextItem[] };
+        let loadError = false;
+        try {
+            context = loadContext();
+        } catch (error) {
+            console.error('CC HUD: Unexpected error loading context:', error);
+            context = { items: [] };
+            loadError = true;
+        }
+
+        // Check if context.json exists to differentiate between "no items" and "error loading"
+        const contextPath = getAbsolutePath('.cc/context.json');
+        let contextFileExists = false;
+        if (contextPath) {
+            try {
+                fs.accessSync(contextPath, fs.constants.R_OK);
+                contextFileExists = true;
+            } catch {
+                // File doesn't exist or isn't readable
+            }
+        }
+
         const percent = calculateContextPercent(this._config.contextTokenLimit);
 
         // Calculate totals
         let includedChars = 0;
-        let totalChars = 0;
         for (const item of context.items) {
-            totalChars += item.sizeChars;
             if (item.included) {
                 includedChars += item.sizeChars;
             }
@@ -116,15 +152,27 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             try {
                 const planContent = fs.readFileSync(planPath, 'utf8');
                 planSize = planContent.length;
-            } catch (error) {
+            } catch {
                 // File doesn't exist or can't be read, use default size
             }
         }
 
         const estimatedTokens = Math.round((includedChars + planSize) / 4);
 
+        // Determine the appropriate empty state message
+        let emptyStateMessage: string;
+        if (loadError) {
+            emptyStateMessage = '<div class="empty-state error">Error loading context. Check the console for details.</div>';
+        } else if (contextFileExists && context.items.length === 0) {
+            emptyStateMessage = '<div class="empty-state">No pinned items. Use "CC HUD: Pin Current File" to add files.</div>';
+        } else if (!contextFileExists) {
+            emptyStateMessage = '<div class="empty-state">No pinned items. Use "CC HUD: Pin Current File" to add files.</div>';
+        } else {
+            emptyStateMessage = '<div class="empty-state">No pinned items. Use "CC HUD: Pin Current File" to add files.</div>';
+        }
+
         const itemsHtml = context.items.length === 0
-            ? '<div class="empty-state">No pinned items. Use "CC HUD: Pin Current File" to add files.</div>'
+            ? emptyStateMessage
             : context.items.map((item, index) => this._renderItem(item, index)).join('');
 
         return `<!DOCTYPE html>
@@ -132,7 +180,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>
         body {
             font-family: var(--vscode-font-family);
@@ -232,6 +280,10 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             padding: 20px;
             text-align: center;
         }
+        .empty-state.error {
+            color: var(--vscode-errorForeground, #f44336);
+            font-style: normal;
+        }
         h3 {
             margin: 0 0 10px 0;
             font-size: 1em;
@@ -254,7 +306,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
     <div class="items">
         ${itemsHtml}
     </div>
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
 
         function toggleItem(index) {
@@ -274,7 +326,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
     }
 
     private _renderItem(item: ContextItem, index: number): string {
-        const name = item.path || item.label || 'Unknown';
+        const name = item.path ?? item.label ?? 'Unknown';
         const sizeTokens = Math.round(item.sizeChars / 4);
         const typeLabel = item.type === 'file' ? 'FILE' : item.type === 'snippet' ? 'SNIP' : 'NOTE';
         const isMissing = item.type === 'file' && item.sizeChars === 0;
@@ -283,13 +335,14 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         const checkboxIcon = item.included ? '&#9745;' : '&#9744;';
         const missingIndicator = isMissing ? '<span class="missing-indicator" title="File not found">&#9888;</span>' : '';
         const sizeDisplay = isMissing ? 'File not found' : `~${sizeTokens.toLocaleString()} tokens`;
+        const itemPath = item.path ?? '';
 
         return `
         <div class="item ${includedClass} ${missingClass}">
             <span class="item-checkbox" onclick="toggleItem(${index})">${checkboxIcon}</span>
             <span class="item-type">${typeLabel}</span>
             <div class="item-info">
-                <div class="item-name" onclick="openFile('${escapeHtml(item.path || '', { escapeSingleQuotes: true })}')">${escapeHtml(name)}${missingIndicator}</div>
+                <div class="item-name" onclick="openFile('${escapeHtml(itemPath, { escapeSingleQuotes: true })}')">${escapeHtml(name)}${missingIndicator}</div>
                 <div class="item-size">${sizeDisplay}</div>
             </div>
             <span class="item-remove" onclick="removeItem(${index})">&#10005;</span>

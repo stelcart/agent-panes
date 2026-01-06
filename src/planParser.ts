@@ -1,3 +1,6 @@
+/** Valid status characters for checkbox markers in plan files */
+export type StatusChar = ' ' | 'x' | '>' | '!';
+
 export interface TodoItem {
     text: string;
     status: 'pending' | 'done' | 'in_progress' | 'blocked';
@@ -24,12 +27,15 @@ export function parsePlan(content: string): ParsedPlan {
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        if (line === undefined) {
+            continue;
+        }
         const match = line.match(/^(\s*)-\s*\[([ x~>!])\]\s*(.+)$/);
 
         if (match) {
-            const indent = match[1].length;
-            const statusChar = match[2];
-            const text = match[3];
+            const indent = (match[1] ?? '').length;
+            const statusChar = (match[2] ?? ' ') as StatusChar | '~';
+            const text = match[3] ?? '';
 
             let status: TodoItem['status'];
             switch (statusChar) {
@@ -59,14 +65,17 @@ export function parsePlan(content: string): ParsedPlan {
             };
 
             // Find parent based on indentation
-            while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+            while (stack.length > 0 && (stack[stack.length - 1]?.indent ?? -1) >= indent) {
                 stack.pop();
             }
 
             if (stack.length === 0) {
                 rootItems.push(item);
             } else {
-                stack[stack.length - 1].item.children.push(item);
+                const parent = stack[stack.length - 1];
+                if (parent) {
+                    parent.item.children.push(item);
+                }
             }
 
             stack.push({ item, indent });
@@ -81,36 +90,50 @@ export function parsePlan(content: string): ParsedPlan {
     };
 }
 
-export function getStatusIcon(status: TodoItem['status']): string {
-    switch (status) {
-        case 'done':
-            return '$(check)';
-        case 'in_progress':
-            return '$(sync~spin)';
-        case 'blocked':
-            return '$(warning)';
-        default:
-            return '$(circle-outline)';
-    }
-}
-
+/**
+ * Toggles the checkbox status at the given line number.
+ * Cycle: pending -> in_progress -> done -> pending
+ * Blocked items are reset to pending when toggled.
+ *
+ * @param content - The full content of the plan file
+ * @param line - 1-indexed line number to toggle
+ * @returns The modified content, or original content if toggle failed
+ */
 export function toggleCheckbox(content: string, line: number): string {
-    const lines = content.split('\n');
-    const targetLine = lines[line - 1]; // Convert to 0-indexed
+    // Validate line number
+    if (!Number.isInteger(line) || line < 1) {
+        console.warn(`[planParser] toggleCheckbox: Invalid line number ${line}, must be a positive integer`);
+        return content;
+    }
 
-    if (!targetLine) {
+    const lines = content.split('\n');
+    const lineIndex = line - 1; // Convert to 0-indexed
+
+    // Check if line exists
+    if (lineIndex >= lines.length) {
+        console.warn(`[planParser] toggleCheckbox: Line ${line} is out of bounds (file has ${lines.length} lines)`);
+        return content;
+    }
+
+    const targetLine = lines[lineIndex];
+
+    // Handle empty or undefined lines
+    if (targetLine === undefined || targetLine === '') {
+        console.debug(`[planParser] toggleCheckbox: Line ${line} is empty`);
         return content;
     }
 
     const match = targetLine.match(/^(\s*-\s*\[)([ x~>!])(\].*)$/);
     if (!match) {
+        console.debug(`[planParser] toggleCheckbox: Line ${line} does not contain a valid checkbox: "${targetLine.substring(0, 50)}..."`);
         return content;
     }
 
-    const currentStatus = match[2];
-    let newStatus: string;
+    const currentStatus = match[2] as StatusChar | '~';
+    let newStatus: StatusChar;
 
     // Toggle: pending -> in_progress -> done -> pending
+    // Blocked items are reset to pending when toggled
     switch (currentStatus) {
         case ' ':
             newStatus = '>';
@@ -122,10 +145,17 @@ export function toggleCheckbox(content: string, line: number): string {
         case 'x':
             newStatus = ' ';
             break;
+        case '!':
+            // Blocked items toggle to pending
+            newStatus = ' ';
+            break;
         default:
+            // This should never happen due to regex, but handle gracefully
+            console.warn(`[planParser] toggleCheckbox: Unexpected status character '${currentStatus}' at line ${line}`);
             newStatus = ' ';
     }
 
-    lines[line - 1] = match[1] + newStatus + match[3];
+    console.debug(`[planParser] toggleCheckbox: Line ${line} status changed from '${currentStatus}' to '${newStatus}'`);
+    lines[lineIndex] = match[1] + newStatus + match[3];
     return lines.join('\n');
 }

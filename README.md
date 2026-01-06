@@ -135,16 +135,18 @@ src/
 ├── extension.ts          # Entry point, registers commands & providers
 ├── initialize.ts         # Creates .cc/ directory structure
 ├── planParser.ts         # Parses checkbox markdown
-├── config.ts             # Loads .vscode/cc-hud.json
+├── config.ts             # Loads .vscode/cc-hud.json, path validation
 ├── context.ts            # Manages pinned context items
+├── pinnedFileWatcher.ts  # Watches pinned files for size changes
 ├── providers/
 │   ├── todoTreeProvider.ts
 │   ├── planViewProvider.ts
 │   ├── thinkingViewProvider.ts
 │   └── contextViewProvider.ts
 └── utils/
-    ├── fileCache.ts
-    └── html.ts
+    ├── fileCache.ts      # Cache invalidation helpers
+    ├── html.ts           # HTML escaping utilities
+    └── markdown.ts       # XSS-safe markdown rendering
 ```
 
 ### Commands
@@ -153,6 +155,7 @@ src/
 |---------|-------------|
 | `npm run compile` | Build TypeScript to `out/` |
 | `npm run watch` | Watch mode (auto-recompile on save) |
+| `npm run lint` | Run ESLint on source files |
 | `npm run package` | Create `.vsix` for distribution |
 
 ## Configuration

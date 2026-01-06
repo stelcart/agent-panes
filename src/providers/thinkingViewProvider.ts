@@ -1,8 +1,13 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { CCHudConfig, getAbsolutePath } from '../config';
 import { escapeHtml } from '../utils/html';
+
+function getNonce(): string {
+    return crypto.randomBytes(16).toString('base64');
+}
 
 export class ThinkingViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'cc-hud.thinking';
@@ -13,6 +18,7 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
     private _watcher?: fs.FSWatcher;
     private _autoFollow: boolean = true;
     private _searchFilter: string = '';
+    private _debounceTimer: NodeJS.Timeout | undefined;
 
     constructor(extensionUri: vscode.Uri, config: CCHudConfig) {
         this._extensionUri = extensionUri;
@@ -21,9 +27,9 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
+        _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
-    ) {
+    ): void {
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -65,10 +71,13 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
             if (this._watcher) {
                 this._watcher.close();
             }
+            if (this._debounceTimer) {
+                clearTimeout(this._debounceTimer);
+            }
         });
     }
 
-    private _setupWatcher() {
+    private _setupWatcher(): void {
         const logPath = getAbsolutePath(this._config.logPath);
         if (!logPath) {
             return;
@@ -83,39 +92,46 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
             // Watch the directory since the file might not exist yet
             const dir = path.dirname(logPath);
             if (fs.existsSync(dir)) {
-                this._watcher = fs.watch(dir, (eventType, filename) => {
+                this._watcher = fs.watch(dir, (_eventType, filename) => {
                     if (filename === 'cc.log') {
-                        this.refresh();
+                        if (this._debounceTimer) {
+                            clearTimeout(this._debounceTimer);
+                        }
+                        this._debounceTimer = setTimeout(() => {
+                            this.refresh();
+                        }, 150);
                     }
                 });
+                this._watcher.on('error', (err) => console.error('CC HUD: Log watcher error:', err));
             }
         } catch (error) {
             console.error('Failed to setup log watcher:', error);
         }
     }
 
-    public refresh() {
+    public refresh(): void {
         if (this._view) {
             this._view.webview.html = this._getHtmlContent();
         }
     }
 
-    private _clearView() {
+    private _clearView(): void {
         // Just clear the view content, don't delete the file
         if (this._view) {
             this._view.webview.postMessage({ type: 'clear' });
         }
     }
 
-    private async _openLogFile() {
+    private async _openLogFile(): Promise<void> {
         const logPath = getAbsolutePath(this._config.logPath);
-        if (logPath) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(logPath);
-                await vscode.window.showTextDocument(doc);
-            } catch (error) {
-                vscode.window.showWarningMessage('CC HUD: Log file not found. Run initialize first.');
-            }
+        if (!logPath) {
+            return;
+        }
+        try {
+            const doc = await vscode.workspace.openTextDocument(logPath);
+            await vscode.window.showTextDocument(doc);
+        } catch {
+            vscode.window.showWarningMessage('CC HUD: Log file not found. Run initialize first.');
         }
     }
 
@@ -162,20 +178,22 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
                 }
 
                 logContent = escapeHtml(filteredLines.join('\n'));
-            } catch (error) {
+            } catch {
                 logContent = 'No log file found. Run "CC HUD: Initialize" and start a Claude Code session.';
             }
         } else {
             logContent = 'No log file found. Run "CC HUD: Initialize" and start a Claude Code session.';
         }
 
+        const nonce = getNonce();
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-    <style>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+    <style nonce="${nonce}">
         body {
             font-family: var(--vscode-editor-font-family, monospace);
             font-size: var(--vscode-editor-font-size, 12px);
@@ -242,7 +260,7 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
     <div class="log-container" id="logContainer">
         <pre class="log-content ${!logContent ? 'empty-state' : ''}">${logContent || 'No log content'}</pre>
     </div>
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         let autoFollow = ${this._autoFollow};
 

@@ -9,26 +9,28 @@ import { pinCurrentFile, updatePinnedFileSizes } from './context';
 import { invalidateCache } from './utils/fileCache';
 import { PinnedFileWatcher } from './pinnedFileWatcher';
 
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const config = loadConfig();
 
     // Move HUD to Secondary Side Bar on first activation
     const hasMovedToSecondarySidebar = context.globalState.get<boolean>('hasMovedToSecondarySidebar');
-    if (!hasMovedToSecondarySidebar) {
+    if (hasMovedToSecondarySidebar !== true) {
         // Delay to ensure views are registered before moving
-        setTimeout(async () => {
-            try {
-                // Focus our view container first
-                await vscode.commands.executeCommand('workbench.view.extension.cc-hud');
-                // Small delay to ensure focus is established
-                await new Promise(resolve => setTimeout(resolve, 100));
-                // Move the focused view to secondary sidebar
-                await vscode.commands.executeCommand('workbench.action.moveViewToSecondarySideBar');
-                // Remember that we've done this
-                await context.globalState.update('hasMovedToSecondarySidebar', true);
-            } catch (error) {
-                console.log('CC HUD: Could not auto-move to secondary sidebar:', error);
-            }
+        setTimeout((): void => {
+            void (async (): Promise<void> => {
+                try {
+                    // Focus our view container first
+                    await vscode.commands.executeCommand('workbench.view.extension.cc-hud');
+                    // Small delay to ensure focus is established
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    // Move the focused view to secondary sidebar
+                    await vscode.commands.executeCommand('workbench.action.moveViewToSecondarySideBar');
+                    // Remember that we've done this
+                    await context.globalState.update('hasMovedToSecondarySidebar', true);
+                } catch (error) {
+                    console.log('CC HUD: Could not auto-move to secondary sidebar:', error);
+                }
+            })();
         }, 500);
     }
 
@@ -94,18 +96,20 @@ export async function activate(context: vscode.ExtensionContext) {
                 planProvider.refresh();
                 thinkingProvider.refresh();
                 contextProvider.refresh();
-                updateStatusBar(statusBarItem, contextProvider);
+                void updateStatusBar(statusBarItem, contextProvider);
 
                 // Move to secondary sidebar again
-                setTimeout(async () => {
-                    try {
-                        await vscode.commands.executeCommand('workbench.view.extension.cc-hud');
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        await vscode.commands.executeCommand('workbench.action.moveViewToSecondarySideBar');
-                        await context.globalState.update('hasMovedToSecondarySidebar', true);
-                    } catch (e) {
-                        // Ignore
-                    }
+                setTimeout((): void => {
+                    void (async (): Promise<void> => {
+                        try {
+                            await vscode.commands.executeCommand('workbench.view.extension.cc-hud');
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            await vscode.commands.executeCommand('workbench.action.moveViewToSecondarySideBar');
+                            await context.globalState.update('hasMovedToSecondarySidebar', true);
+                        } catch {
+                            // Ignore
+                        }
+                    })();
                 }, 500);
 
                 vscode.window.showInformationMessage('CC HUD: Reset complete. Ask Claude Code to update its todo list to sync.');
@@ -128,7 +132,7 @@ export async function activate(context: vscode.ExtensionContext) {
             planProvider.refresh();
             thinkingProvider.refresh();
             contextProvider.refresh();
-            updateStatusBar(statusBarItem, contextProvider);
+            void updateStatusBar(statusBarItem, contextProvider);
             vscode.window.showInformationMessage('CC HUD: Views refreshed');
         })
     );
@@ -153,7 +157,7 @@ export async function activate(context: vscode.ExtensionContext) {
     let contextDebounceTimer: NodeJS.Timeout | undefined;
 
     const planWatcher = vscode.workspace.createFileSystemWatcher('**/.cc/plan.md');
-    const handlePlanChange = (uri: vscode.Uri) => {
+    const handlePlanChange = (uri: vscode.Uri): void => {
         if (planDebounceTimer) {
             clearTimeout(planDebounceTimer);
         }
@@ -164,7 +168,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 planProvider.refresh();
                 // Also refresh context pane since it includes plan.md in token calculation
                 contextProvider.refresh();
-                updateStatusBar(statusBarItem, contextProvider);
+                void updateStatusBar(statusBarItem, contextProvider);
             } catch (error) {
                 console.error('CC HUD: Error handling plan file change:', error);
             }
@@ -185,7 +189,7 @@ export async function activate(context: vscode.ExtensionContext) {
             invalidateCache(workspaceFolder.uri.fsPath + '/.cc/context.json');
         }
         contextProvider.refresh();
-        updateStatusBar(statusBarItem, contextProvider);
+        void updateStatusBar(statusBarItem, contextProvider);
     });
     context.subscriptions.push(fileUpdateSubscription);
 
@@ -196,7 +200,7 @@ export async function activate(context: vscode.ExtensionContext) {
     updatePinnedFileSizes();
 
     const contextWatcher = vscode.workspace.createFileSystemWatcher('**/.cc/context.json');
-    const handleContextChange = (uri: vscode.Uri) => {
+    const handleContextChange = (uri: vscode.Uri): void => {
         if (contextDebounceTimer) {
             clearTimeout(contextDebounceTimer);
         }
@@ -204,7 +208,7 @@ export async function activate(context: vscode.ExtensionContext) {
             try {
                 invalidateCache(uri.fsPath);
                 contextProvider.refresh();
-                updateStatusBar(statusBarItem, contextProvider);
+                void updateStatusBar(statusBarItem, contextProvider);
                 // Sync watchers when context.json changes (files may have been pinned/unpinned)
                 pinnedFileWatcher.syncWatchers();
             } catch (error) {
@@ -217,10 +221,10 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(contextWatcher);
 
     // Initial status bar update
-    updateStatusBar(statusBarItem, contextProvider);
+    void updateStatusBar(statusBarItem, contextProvider);
 }
 
-async function updateStatusBar(statusBarItem: vscode.StatusBarItem, contextProvider: ContextViewProvider) {
+async function updateStatusBar(statusBarItem: vscode.StatusBarItem, contextProvider: ContextViewProvider): Promise<void> {
     try {
         const percent = await contextProvider.getContextPercent();
         statusBarItem.text = `$(hubot) CC HUD: Context ${percent}%`;
@@ -230,4 +234,4 @@ async function updateStatusBar(statusBarItem: vscode.StatusBarItem, contextProvi
     }
 }
 
-export function deactivate() {}
+export function deactivate(): void {}

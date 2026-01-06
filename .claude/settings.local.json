@@ -5,7 +5,13 @@
       "Bash(npm run compile:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx eslint src/extension.ts)",
+      "Bash(npx tsc:*)",
+      "Bash(echo:*)"
     ]
   }
 }
