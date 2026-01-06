@@ -25,6 +25,65 @@ const DEFAULT_CONTEXT = {
     items: []
 };
 
+// Hook script that logs tool activity to .cc/cc.log
+const LOG_ACTIVITY_HOOK = `#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    try {
+        const data = JSON.parse(input);
+        const projectDir = data.cwd || process.cwd();
+        const logPath = path.join(projectDir, '.cc', 'cc.log');
+
+        // Ensure .cc directory exists
+        const ccDir = path.dirname(logPath);
+        if (!fs.existsSync(ccDir)) {
+            fs.mkdirSync(ccDir, { recursive: true });
+        }
+
+        const timestamp = new Date().toLocaleTimeString();
+        const toolName = data.tool_name || 'unknown';
+        let logLine = '';
+
+        // Format based on tool type
+        if (toolName === 'Read') {
+            const filePath = data.tool_input?.file_path || '';
+            logLine = \`[\${timestamp}] Read: \${filePath}\\n\`;
+        } else if (toolName === 'Write') {
+            const filePath = data.tool_input?.file_path || '';
+            logLine = \`[\${timestamp}] Write: \${filePath}\\n\`;
+        } else if (toolName === 'Edit') {
+            const filePath = data.tool_input?.file_path || '';
+            logLine = \`[\${timestamp}] Edit: \${filePath}\\n\`;
+        } else if (toolName === 'Bash') {
+            const cmd = data.tool_input?.command || '';
+            const shortCmd = cmd.length > 80 ? cmd.substring(0, 80) + '...' : cmd;
+            logLine = \`[\${timestamp}] Bash: \${shortCmd}\\n\`;
+        } else if (toolName === 'Glob' || toolName === 'Grep') {
+            const pattern = data.tool_input?.pattern || '';
+            logLine = \`[\${timestamp}] \${toolName}: \${pattern}\\n\`;
+        } else if (toolName === 'TodoWrite') {
+            // Skip - handled by sync-plan.js
+            process.exit(0);
+        } else if (toolName === 'Task') {
+            const desc = data.tool_input?.description || '';
+            logLine = \`[\${timestamp}] Task: \${desc}\\n\`;
+        } else {
+            logLine = \`[\${timestamp}] \${toolName}\\n\`;
+        }
+
+        fs.appendFileSync(logPath, logLine);
+    } catch (err) {
+        // Silent fail
+    }
+    process.exit(0);
+});
+`;
+
 // Hook script that syncs TodoWrite tool output to .cc/plan.md
 const SYNC_PLAN_HOOK = `#!/usr/bin/env node
 const fs = require('fs');
@@ -230,13 +289,17 @@ async function setupClaudeHook(rootPath: string) {
         fs.mkdirSync(hooksDir, { recursive: true });
     }
 
-    // 2. Write the hook script
-    const hookScriptPath = path.join(hooksDir, 'sync-plan.js');
-    fs.writeFileSync(hookScriptPath, SYNC_PLAN_HOOK);
+    // 2. Write the hook scripts
+    const syncPlanPath = path.join(hooksDir, 'sync-plan.js');
+    fs.writeFileSync(syncPlanPath, SYNC_PLAN_HOOK);
+
+    const logActivityPath = path.join(hooksDir, 'log-activity.js');
+    fs.writeFileSync(logActivityPath, LOG_ACTIVITY_HOOK);
 
     // Make executable on Unix systems
     try {
-        fs.chmodSync(hookScriptPath, 0o755);
+        fs.chmodSync(syncPlanPath, 0o755);
+        fs.chmodSync(logActivityPath, 0o755);
     } catch {
         // Ignore chmod errors on Windows
     }
@@ -264,14 +327,32 @@ async function setupClaudeHook(rootPath: string) {
         settings.hooks.PostToolUse = [];
     }
 
-    // Check if our hook already exists
-    const existingHook = settings.hooks.PostToolUse.find(
+    // Add sync-plan hook if not exists
+    const existingSyncHook = settings.hooks.PostToolUse.find(
         (h: any) => h.matcher === 'TodoWrite' &&
             h.hooks?.some((hook: any) => hook.command?.includes('sync-plan.js'))
     );
 
-    if (!existingHook) {
+    if (!existingSyncHook) {
         settings.hooks.PostToolUse.push(HOOK_SETTINGS.hooks.PostToolUse[0]);
+    }
+
+    // Add log-activity hook if not exists (matches all tools except TodoWrite)
+    const existingLogHook = settings.hooks.PostToolUse.find(
+        (h: any) => h.hooks?.some((hook: any) => hook.command?.includes('log-activity.js'))
+    );
+
+    if (!existingLogHook) {
+        settings.hooks.PostToolUse.push({
+            matcher: ".*",
+            hooks: [
+                {
+                    type: "command",
+                    command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/log-activity.js\"",
+                    timeout: 5
+                }
+            ]
+        });
     }
 
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
