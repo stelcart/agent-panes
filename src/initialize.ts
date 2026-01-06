@@ -85,6 +85,7 @@ process.stdin.on('end', () => {
 `;
 
 // Hook script that syncs TodoWrite tool output to .cc/plan.md
+// Only updates the "## Current Tasks" section, preserving other content
 const SYNC_PLAN_HOOK = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
@@ -107,23 +108,6 @@ process.stdin.on('end', () => {
             process.exit(0);
         }
 
-        // Convert todos to plan.md format
-        const statusMap = {
-            'pending': '[ ]',
-            'in_progress': '[>]',
-            'completed': '[x]'
-        };
-
-        let planContent = '# Plan\\n\\n## Current Tasks\\n';
-
-        for (const todo of todos) {
-            const checkbox = statusMap[todo.status] || '[ ]';
-            planContent += \`- \${checkbox} \${todo.content}\\n\`;
-        }
-
-        planContent += '\\n## Notes\\n- Auto-synced from Claude Code\\n';
-
-        // Write to .cc/plan.md
         const projectDir = data.cwd || process.cwd();
         const planPath = path.join(projectDir, '.cc', 'plan.md');
 
@@ -133,7 +117,42 @@ process.stdin.on('end', () => {
             fs.mkdirSync(ccDir, { recursive: true });
         }
 
-        fs.writeFileSync(planPath, planContent);
+        // Convert todos to markdown format
+        const statusMap = {
+            'pending': '[ ]',
+            'in_progress': '[>]',
+            'completed': '[x]'
+        };
+
+        let tasksSection = '## Current Tasks\\n\\n';
+        for (const todo of todos) {
+            const checkbox = statusMap[todo.status] || '[ ]';
+            tasksSection += \`- \${checkbox} \${todo.content}\\n\`;
+        }
+
+        // Read existing plan content
+        let existingContent = '';
+        if (fs.existsSync(planPath)) {
+            existingContent = fs.readFileSync(planPath, 'utf8');
+        }
+
+        let newContent;
+
+        // Pattern to find "## Current Tasks" section (until next ## or # or end of file)
+        const tasksSectionRegex = /## Current Tasks[\\s\\S]*?(?=\\n## |\\n# |$)/;
+
+        if (tasksSectionRegex.test(existingContent)) {
+            // Replace existing "## Current Tasks" section
+            newContent = existingContent.replace(tasksSectionRegex, tasksSection.trim());
+        } else if (existingContent.trim()) {
+            // Append section to existing content
+            newContent = existingContent.trim() + '\\n\\n' + tasksSection;
+        } else {
+            // No existing content, create new file with default structure
+            newContent = '# Plan\\n\\n## Objective\\n- (fill in objective)\\n\\n' + tasksSection + '\\n## Notes\\n- Auto-synced from Claude Code\\n';
+        }
+
+        fs.writeFileSync(planPath, newContent);
 
     } catch (err) {
         // Silent fail - don't break Claude Code

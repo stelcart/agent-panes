@@ -175,6 +175,61 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
             padding: 2px 4px;
             border-radius: 3px;
         }
+        pre {
+            background: var(--vscode-textCodeBlock-background);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 0.5em 0;
+        }
+        pre code {
+            padding: 0;
+            background: none;
+        }
+        blockquote {
+            border-left: 3px solid var(--vscode-textBlockQuote-border);
+            margin: 0.5em 0;
+            padding-left: 10px;
+            color: var(--vscode-textBlockQuote-foreground);
+        }
+        hr {
+            border: none;
+            border-top: 1px solid var(--vscode-panel-border);
+            margin: 1em 0;
+        }
+        h4 { font-size: 1em; margin-top: 1em; margin-bottom: 0.5em; }
+        strong { font-weight: bold; }
+        em { font-style: italic; }
+        del { text-decoration: line-through; opacity: 0.7; }
+        a {
+            color: var(--vscode-textLink-foreground);
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        ol {
+            padding-left: 1.5em;
+            margin: 0.5em 0;
+        }
+        table {
+            border-collapse: collapse;
+            margin: 0.5em 0;
+            width: 100%;
+            font-size: 0.9em;
+        }
+        th, td {
+            border: 1px solid var(--vscode-panel-border);
+            padding: 6px 10px;
+            text-align: left;
+        }
+        th {
+            background: var(--vscode-editor-background);
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background: var(--vscode-list-hoverBackground);
+        }
     </style>
 </head>
 <body>
@@ -209,25 +264,83 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
         let html = '';
         let inList = false;
         let listStack: number[] = [];
+        let inCodeBlock = false;
+        let codeBlockContent = '';
+        let inTable = false;
+        let tableLines: string[] = [];
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const lineNum = i + 1;
 
+            // Code blocks
+            if (line.startsWith('```')) {
+                if (inCodeBlock) {
+                    html += `<pre><code>${escapeHtml(codeBlockContent.trim())}</code></pre>`;
+                    codeBlockContent = '';
+                    inCodeBlock = false;
+                } else {
+                    if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
+                    inCodeBlock = true;
+                }
+                continue;
+            }
+
+            if (inCodeBlock) {
+                codeBlockContent += line + '\n';
+                continue;
+            }
+
+            // Table rows (lines with | that aren't in code blocks)
+            const isTableRow = line.includes('|') && line.trim().startsWith('|');
+            if (isTableRow) {
+                if (!inTable) {
+                    if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
+                    inTable = true;
+                    tableLines = [];
+                }
+                tableLines.push(line);
+                continue;
+            } else if (inTable) {
+                // End of table - render it
+                html += this._renderTable(tableLines);
+                inTable = false;
+                tableLines = [];
+            }
+
+            // Horizontal rule
+            if (line.match(/^(-{3,}|_{3,}|\*{3,})$/)) {
+                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
+                html += '<hr>';
+                continue;
+            }
+
             // Headers
             if (line.startsWith('# ')) {
                 if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h1>${this._escapeAndFormatHtml(line.slice(2))}</h1>`;
+                html += `<h1>${this._formatInlineMarkdown(line.slice(2))}</h1>`;
                 continue;
             }
             if (line.startsWith('## ')) {
                 if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h2>${this._escapeAndFormatHtml(line.slice(3))}</h2>`;
+                html += `<h2>${this._formatInlineMarkdown(line.slice(3))}</h2>`;
                 continue;
             }
             if (line.startsWith('### ')) {
                 if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
-                html += `<h3>${this._escapeAndFormatHtml(line.slice(4))}</h3>`;
+                html += `<h3>${this._formatInlineMarkdown(line.slice(4))}</h3>`;
+                continue;
+            }
+            if (line.startsWith('#### ')) {
+                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
+                html += `<h4>${this._formatInlineMarkdown(line.slice(5))}</h4>`;
+                continue;
+            }
+
+            // Blockquotes
+            if (line.startsWith('> ')) {
+                if (inList) { html += this._closeList(listStack); inList = false; listStack = []; }
+                html += `<blockquote>${this._formatInlineMarkdown(line.slice(2))}</blockquote>`;
                 continue;
             }
 
@@ -256,7 +369,7 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
                 const statusClass = status === 'x' ? 'done' : (status === '>' || status === '~') ? 'in-progress' : status === '!' ? 'blocked' : '';
                 const checkboxChar = status === 'x' ? '&#9745;' : (status === '>' || status === '~') ? '&#9655;' : status === '!' ? '&#9888;' : '&#9744;';
 
-                html += `<li class="${statusClass}"><span class="checkbox" onclick="toggleCheckbox(${lineNum})">${checkboxChar}</span> ${this._escapeAndFormatHtml(text)}`;
+                html += `<li class="${statusClass}"><span class="checkbox" onclick="toggleCheckbox(${lineNum})">${checkboxChar}</span> ${this._formatInlineMarkdown(text)}`;
                 continue;
             }
 
@@ -272,7 +385,20 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
                     listStack.push(indent);
                 }
 
-                html += `<li>${this._escapeAndFormatHtml(text)}</li>`;
+                html += `<li>${this._formatInlineMarkdown(text)}</li>`;
+                continue;
+            }
+
+            // Numbered list items
+            const numberedMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
+            if (numberedMatch) {
+                const text = numberedMatch[2];
+                if (!inList) {
+                    html += '<ol>';
+                    inList = true;
+                    listStack.push(0);
+                }
+                html += `<li>${this._formatInlineMarkdown(text)}</li>`;
                 continue;
             }
 
@@ -293,14 +419,62 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
                 inList = false;
                 listStack = [];
             }
-            html += `<p>${this._escapeAndFormatHtml(line)}</p>`;
+            html += `<p>${this._formatInlineMarkdown(line)}</p>`;
         }
 
         if (inList) {
             html += this._closeList(listStack);
         }
 
+        if (inTable) {
+            html += this._renderTable(tableLines);
+        }
+
         return html;
+    }
+
+    private _renderTable(lines: string[]): string {
+        if (lines.length < 2) {
+            // Not a valid table (need at least header + separator)
+            return lines.map(l => `<p>${this._formatInlineMarkdown(l)}</p>`).join('');
+        }
+
+        // Parse cells from a line
+        const parseCells = (line: string): string[] => {
+            return line.split('|')
+                .slice(1, -1) // Remove empty first/last from | at start/end
+                .map(cell => cell.trim());
+        };
+
+        // Check if second line is a separator (contains only -, :, |, and spaces)
+        const separatorLine = lines[1].trim();
+        const isSeparator = /^\|[\s\-:|]+\|$/.test(separatorLine);
+
+        if (!isSeparator) {
+            // Not a valid table
+            return lines.map(l => `<p>${this._formatInlineMarkdown(l)}</p>`).join('');
+        }
+
+        const headerCells = parseCells(lines[0]);
+        const dataRows = lines.slice(2).map(parseCells);
+
+        let tableHtml = '<table><thead><tr>';
+        for (const cell of headerCells) {
+            tableHtml += `<th>${this._formatInlineMarkdown(cell)}</th>`;
+        }
+        tableHtml += '</tr></thead><tbody>';
+
+        for (const row of dataRows) {
+            tableHtml += '<tr>';
+            for (let i = 0; i < headerCells.length; i++) {
+                const cellContent = row[i] || '';
+                tableHtml += `<td>${this._formatInlineMarkdown(cellContent)}</td>`;
+            }
+            tableHtml += '</tr>';
+        }
+
+        tableHtml += '</tbody></table>';
+        return tableHtml;
     }
 
     private _closeList(stack: number[]): string {
@@ -311,8 +485,27 @@ export class PlanViewProvider implements vscode.WebviewViewProvider {
         return html;
     }
 
-    private _escapeAndFormatHtml(text: string): string {
-        // First escape HTML, then convert backticks to code tags
-        return escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+    private _formatInlineMarkdown(text: string): string {
+        // First escape HTML
+        let result = escapeHtml(text);
+
+        // Bold: **text** or __text__
+        result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        result = result.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+        // Italic: *text* or _text_ (but not inside words)
+        result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        result = result.replace(/(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])/g, '<em>$1</em>');
+
+        // Inline code: `text`
+        result = result.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+        // Links: [text](url)
+        result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" title="$2">$1</a>');
+
+        // Strikethrough: ~~text~~
+        result = result.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+
+        return result;
     }
 }

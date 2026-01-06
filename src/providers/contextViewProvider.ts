@@ -177,6 +177,18 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         .item.excluded {
             opacity: 0.5;
         }
+        .item.missing {
+            border-left: 3px solid var(--vscode-editorWarning-foreground, #ff9800);
+        }
+        .item.missing .item-name {
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        .missing-indicator {
+            color: var(--vscode-editorWarning-foreground, #ff9800);
+            font-size: 0.85em;
+            margin-left: 4px;
+        }
         .item-checkbox {
             margin-right: 8px;
             cursor: pointer;
@@ -265,16 +277,20 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         const name = item.path || item.label || 'Unknown';
         const sizeTokens = Math.round(item.sizeChars / 4);
         const typeLabel = item.type === 'file' ? 'FILE' : item.type === 'snippet' ? 'SNIP' : 'NOTE';
+        const isMissing = item.type === 'file' && item.sizeChars === 0;
         const includedClass = item.included ? '' : 'excluded';
+        const missingClass = isMissing ? 'missing' : '';
         const checkboxIcon = item.included ? '&#9745;' : '&#9744;';
+        const missingIndicator = isMissing ? '<span class="missing-indicator" title="File not found">&#9888;</span>' : '';
+        const sizeDisplay = isMissing ? 'File not found' : `~${sizeTokens.toLocaleString()} tokens`;
 
         return `
-        <div class="item ${includedClass}">
+        <div class="item ${includedClass} ${missingClass}">
             <span class="item-checkbox" onclick="toggleItem(${index})">${checkboxIcon}</span>
             <span class="item-type">${typeLabel}</span>
             <div class="item-info">
-                <div class="item-name" onclick="openFile('${escapeHtml(item.path || '', { escapeSingleQuotes: true })}')">${escapeHtml(name)}</div>
-                <div class="item-size">~${sizeTokens.toLocaleString()} tokens</div>
+                <div class="item-name" onclick="openFile('${escapeHtml(item.path || '', { escapeSingleQuotes: true })}')">${escapeHtml(name)}${missingIndicator}</div>
+                <div class="item-size">${sizeDisplay}</div>
             </div>
             <span class="item-remove" onclick="removeItem(${index})">&#10005;</span>
         </div>`;

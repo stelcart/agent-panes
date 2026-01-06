@@ -98,6 +98,107 @@ export async function pinCurrentFile(): Promise<void> {
     vscode.window.showInformationMessage(`CC HUD: Pinned ${relativePath}`);
 }
 
+/**
+ * Updates the sizeChars for all pinned files based on their current file contents.
+ * Handles deleted files by marking them with sizeChars: 0.
+ * Returns the list of file paths that were updated (for watcher management).
+ */
+export function updatePinnedFileSizes(): { updated: string[]; deleted: string[] } {
+    const context = loadContext();
+    const updated: string[] = [];
+    const deleted: string[] = [];
+    let hasChanges = false;
+
+    for (const item of context.items) {
+        if (item.type === 'file' && item.path) {
+            const absolutePath = getAbsolutePath(item.path);
+            if (!absolutePath) {
+                continue;
+            }
+
+            try {
+                const content = fs.readFileSync(absolutePath, 'utf8');
+                const newSize = content.length;
+
+                if (item.sizeChars !== newSize) {
+                    item.sizeChars = newSize;
+                    item.updatedAt = new Date().toISOString();
+                    hasChanges = true;
+                    updated.push(item.path);
+                }
+            } catch (error) {
+                // File doesn't exist or can't be read
+                if (item.sizeChars !== 0) {
+                    item.sizeChars = 0;
+                    item.updatedAt = new Date().toISOString();
+                    hasChanges = true;
+                    deleted.push(item.path);
+                }
+            }
+        }
+    }
+
+    if (hasChanges) {
+        saveContext(context);
+    }
+
+    return { updated, deleted };
+}
+
+/**
+ * Updates the size of a single pinned file by its path.
+ * Returns true if the size was updated, false otherwise.
+ */
+export function updateSingleFileSizeByPath(filePath: string): boolean {
+    const context = loadContext();
+
+    // Find the item with this path
+    const item = context.items.find(
+        i => i.type === 'file' && i.path === filePath
+    );
+
+    if (!item || !item.path) {
+        return false;
+    }
+
+    const absolutePath = getAbsolutePath(item.path);
+    if (!absolutePath) {
+        return false;
+    }
+
+    try {
+        const content = fs.readFileSync(absolutePath, 'utf8');
+        const newSize = content.length;
+
+        if (item.sizeChars !== newSize) {
+            item.sizeChars = newSize;
+            item.updatedAt = new Date().toISOString();
+            saveContext(context);
+            return true;
+        }
+    } catch (error) {
+        // File doesn't exist or can't be read - mark as 0 size
+        if (item.sizeChars !== 0) {
+            item.sizeChars = 0;
+            item.updatedAt = new Date().toISOString();
+            saveContext(context);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Gets the list of all pinned file paths (relative paths).
+ */
+export function getPinnedFilePaths(): string[] {
+    const context = loadContext();
+    return context.items
+        .filter(item => item.type === 'file' && item.path)
+        .map(item => item.path!);
+}
+
 export function calculateContextPercent(contextTokenLimit: number): number {
     const context = loadContext();
     const planPath = getAbsolutePath('.cc/plan.md');
@@ -121,7 +222,10 @@ export function calculateContextPercent(contextTokenLimit: number): number {
         }
     }
 
-    // chars / 4 = tokens (approx)
+    // Token estimation: ~4 characters per token is the industry standard for BPE tokenizers.
+    // Note: Claude uses a proprietary tokenizer (not cl100k_base), so any estimation is approximate.
+    // Using tiktoken would add ~22MB bundle size and still only be an approximation.
+    // For a UI gauge (not billing), this simple heuristic is sufficient.
     const estimatedTokens = totalChars / 4;
     const percent = Math.round((estimatedTokens / contextTokenLimit) * 100);
 

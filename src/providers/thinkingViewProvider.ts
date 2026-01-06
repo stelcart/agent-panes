@@ -268,9 +268,12 @@ export class ThinkingViewProvider implements vscode.WebviewViewProvider {
         }
 
         // Auto-scroll to bottom if auto-follow is enabled
+        // Use requestAnimationFrame to ensure DOM is fully rendered before scrolling
         if (autoFollow) {
-            const container = document.getElementById('logContainer');
-            container.scrollTop = container.scrollHeight;
+            requestAnimationFrame(() => {
+                const container = document.getElementById('logContainer');
+                container.scrollTop = container.scrollHeight;
+            });
         }
 
         window.addEventListener('message', event => {

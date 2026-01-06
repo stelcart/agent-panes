@@ -5,8 +5,9 @@ import { PlanViewProvider } from './providers/planViewProvider';
 import { ThinkingViewProvider } from './providers/thinkingViewProvider';
 import { ContextViewProvider } from './providers/contextViewProvider';
 import { loadConfig } from './config';
-import { pinCurrentFile } from './context';
+import { pinCurrentFile, updatePinnedFileSizes } from './context';
 import { invalidateCache } from './utils/fileCache';
+import { PinnedFileWatcher } from './pinnedFileWatcher';
 
 export async function activate(context: vscode.ExtensionContext) {
     const config = loadConfig();
@@ -161,6 +162,9 @@ export async function activate(context: vscode.ExtensionContext) {
                 invalidateCache(uri.fsPath);
                 todoProvider.refresh();
                 planProvider.refresh();
+                // Also refresh context pane since it includes plan.md in token calculation
+                contextProvider.refresh();
+                updateStatusBar(statusBarItem, contextProvider);
             } catch (error) {
                 console.error('CC HUD: Error handling plan file change:', error);
             }
@@ -169,6 +173,27 @@ export async function activate(context: vscode.ExtensionContext) {
     planWatcher.onDidChange(handlePlanChange);
     planWatcher.onDidCreate(handlePlanChange);
     context.subscriptions.push(planWatcher);
+
+    // Create pinned file watcher for automatic size updates
+    const pinnedFileWatcher = new PinnedFileWatcher();
+    context.subscriptions.push(pinnedFileWatcher);
+
+    // When a pinned file is updated, refresh the context view and status bar
+    const fileUpdateSubscription = pinnedFileWatcher.onFileUpdated(() => {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (workspaceFolder) {
+            invalidateCache(workspaceFolder.uri.fsPath + '/.cc/context.json');
+        }
+        contextProvider.refresh();
+        updateStatusBar(statusBarItem, contextProvider);
+    });
+    context.subscriptions.push(fileUpdateSubscription);
+
+    // Initial sync of pinned file watchers
+    pinnedFileWatcher.syncWatchers();
+
+    // Update all pinned file sizes on activation (in case files changed while extension was inactive)
+    updatePinnedFileSizes();
 
     const contextWatcher = vscode.workspace.createFileSystemWatcher('**/.cc/context.json');
     const handleContextChange = (uri: vscode.Uri) => {
@@ -180,12 +205,15 @@ export async function activate(context: vscode.ExtensionContext) {
                 invalidateCache(uri.fsPath);
                 contextProvider.refresh();
                 updateStatusBar(statusBarItem, contextProvider);
+                // Sync watchers when context.json changes (files may have been pinned/unpinned)
+                pinnedFileWatcher.syncWatchers();
             } catch (error) {
                 console.error('CC HUD: Error handling context file change:', error);
             }
         }, DEBOUNCE_DELAY);
     };
     contextWatcher.onDidChange(handleContextChange);
+    contextWatcher.onDidCreate(handleContextChange);
     context.subscriptions.push(contextWatcher);
 
     // Initial status bar update
