@@ -22,7 +22,7 @@ git clone https://github.com/stelcart/agent-panes.git
 cd agent-panes
 npm install
 npm run package
-code --install-extension cc-hud-0.0.1.vsix
+code --install-extension cc-hud-0.2.0.vsix
 ```
 
 ## Quick Start
@@ -117,7 +117,7 @@ To share your local build with another machine or teammate:
 npm run package
 
 # Copy cc-hud-0.0.1.vsix to target machine, then:
-code --install-extension cc-hud-0.0.1.vsix
+code --install-extension cc-hud-0.2.0.vsix
 ```
 
 Or commit and push, then on the other machine:
@@ -125,7 +125,7 @@ Or commit and push, then on the other machine:
 git pull
 npm install
 npm run package
-code --install-extension cc-hud-0.0.1.vsix
+code --install-extension cc-hud-0.2.0.vsix
 ```
 
 ### Project Structure

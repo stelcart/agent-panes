@@ -2,7 +2,7 @@
   "name": "cc-hud",
   "displayName": "CC HUD",
   "description": "A HUD for working with Claude Code via the terminal, using files as the integration surface",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "publisher": "cc-hud",
   "engines": {
     "vscode": "^1.85.0"
