@@ -34,6 +34,12 @@ jobs:
       - name: Package VSIX
         run: npm run package
 
+      - name: Move latest tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git tag -f latest
+          git push -f origin latest
+
       - name: Update latest release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
