@@ -6,19 +6,19 @@ A VS Code extension that provides a heads-up display for working with [Claude Co
 
 ### From VSIX (Recommended)
 
-1. Download the latest `.vsix` from [Releases](../../releases)
+1. Download the latest `.vsix` from [Releases](https://github.com/stelcart/agent-panes/releases/latest)
 2. In VS Code: `Cmd+Shift+P` → "Extensions: Install from VSIX..."
 3. Select the downloaded file
 
 Or via command line:
 ```bash
-code --install-extension cc-hud-0.0.1.vsix
+code --install-extension cc-hud-*.vsix
 ```
 
 ### From Source
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/stelcart/agent-panes.git
 cd agent-panes
 npm install
 npm run package
