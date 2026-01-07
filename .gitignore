@@ -2,3 +2,10 @@ out/
 node_modules/
 *.vsix
 .cc/
+
+# Claude Code local files (source of truth is in src/initialize.ts)
+.claude/hooks/
+.claude/settings.local.json
+
+# Per-workspace extension config
+.vscode/cc-hud.json

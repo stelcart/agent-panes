@@ -15,6 +15,25 @@
       "isBackground": true,
       "label": "npm: watch",
       "group": "build"
+    },
+    {
+      "label": "Claude Code (logged)",
+      "type": "shell",
+      "command": "",
+      "osx": {
+        "command": "bash -lc 'claude 2>&1 | tee -a .cc/cc.log'"
+      },
+      "linux": {
+        "command": "bash -lc 'claude 2>&1 | tee -a .cc/cc.log'"
+      },
+      "windows": {
+        "command": "powershell -NoProfile -Command \"claude 2>&1 | Tee-Object -FilePath .cc\\cc.log -Append\""
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
     }
   ]
 }
