@@ -717,3 +717,59 @@ async function setupClaudeHook(rootPath: string): Promise<void> {
 
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
+
+/**
+ * Silently update hook scripts if they differ from the embedded source.
+ * Called on extension activation to auto-update hooks when the extension is updated.
+ * Returns true if any hooks were updated.
+ */
+export function updateHooksIfNeeded(rootPath: string): boolean {
+    const hooksDir = path.join(rootPath, '.claude', 'hooks');
+
+    // If hooks directory doesn't exist, don't do anything (let full initialize handle it)
+    if (!fs.existsSync(hooksDir)) {
+        return false;
+    }
+
+    const hookFiles: Array<{ name: string; content: string }> = [
+        { name: 'sync-plan.js', content: SYNC_PLAN_HOOK },
+        { name: 'log-activity.js', content: LOG_ACTIVITY_HOOK },
+        { name: 'sync-context.js', content: SYNC_CONTEXT_HOOK },
+        { name: 'pre-compact.js', content: PRE_COMPACT_HOOK },
+    ];
+
+    let updated = false;
+
+    for (const hook of hookFiles) {
+        const hookPath = path.join(hooksDir, hook.name);
+
+        try {
+            // Check if file exists and compare content
+            if (fs.existsSync(hookPath)) {
+                const existingContent = fs.readFileSync(hookPath, 'utf8');
+                if (existingContent !== hook.content) {
+                    fs.writeFileSync(hookPath, hook.content);
+                    try {
+                        fs.chmodSync(hookPath, 0o755);
+                    } catch {
+                        // Ignore chmod errors on Windows
+                    }
+                    updated = true;
+                }
+            } else {
+                // File doesn't exist, create it
+                fs.writeFileSync(hookPath, hook.content);
+                try {
+                    fs.chmodSync(hookPath, 0o755);
+                } catch {
+                    // Ignore chmod errors on Windows
+                }
+                updated = true;
+            }
+        } catch {
+            // Ignore errors for individual hooks
+        }
+    }
+
+    return updated;
+}

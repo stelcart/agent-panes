@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { initialize } from './initialize';
+import { initialize, updateHooksIfNeeded } from './initialize';
 import { TodoTreeProvider } from './providers/todoTreeProvider';
 import { PlanViewProvider } from './providers/planViewProvider';
 import { ThinkingViewProvider } from './providers/thinkingViewProvider';
@@ -50,15 +50,22 @@ function hasRequiredHooks(rootPath: string): boolean {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const config = loadConfig();
 
-    // Auto-initialize if hooks are missing
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (workspaceFolder && !hasRequiredHooks(workspaceFolder.uri.fsPath)) {
-        log('CC HUD: Required hooks not found, auto-initializing...');
-        try {
-            await initialize(context);
-            log('CC HUD: Auto-initialization complete');
-        } catch (err) {
-            error('CC HUD: Auto-initialization failed:', err);
+    if (workspaceFolder) {
+        // Auto-update hooks if they exist but are outdated (silent upgrade)
+        if (updateHooksIfNeeded(workspaceFolder.uri.fsPath)) {
+            log('CC HUD: Hook scripts updated to latest version');
+        }
+
+        // Auto-initialize if hooks are missing entirely
+        if (!hasRequiredHooks(workspaceFolder.uri.fsPath)) {
+            log('CC HUD: Required hooks not found, auto-initializing...');
+            try {
+                await initialize(context);
+                log('CC HUD: Auto-initialization complete');
+            } catch (err) {
+                error('CC HUD: Auto-initialization failed:', err);
+            }
         }
     }
 
