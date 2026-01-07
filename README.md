@@ -171,7 +171,3 @@ After initialization, edit `.vscode/cc-hud.json`:
   "thinkingTailLines": 500
 }
 ```
-
-## License
-
-MIT
