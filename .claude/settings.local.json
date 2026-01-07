@@ -35,7 +35,8 @@
       "Bash(done)",
       "Bash(git -C /Users/ido/source/agent-panes diff src/initialize.ts .claude/hooks/sync-context.js)",
       "Bash(git -C /Users/ido/source/agent-panes log --oneline -3)",
-      "Bash(git -C /Users/ido/source/agent-panes commit -m \"$\\(cat <<''EOF''\nFix context token calculation to include cached tokens\n\nPreviously only counted input_tokens, but Claude API reports tokens across\nthree fields: input_tokens, cache_creation_input_tokens, and cache_read_input_tokens.\nThese are mutually exclusive categories that together represent total context.\n\nThis was causing context pane to show ~3% when actual usage was ~70%.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git -C /Users/ido/source/agent-panes commit -m \"$\\(cat <<''EOF''\nFix context token calculation to include cached tokens\n\nPreviously only counted input_tokens, but Claude API reports tokens across\nthree fields: input_tokens, cache_creation_input_tokens, and cache_read_input_tokens.\nThese are mutually exclusive categories that together represent total context.\n\nThis was causing context pane to show ~3% when actual usage was ~70%.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/ido/source/agent-panes log --oneline -1)"
     ]
   },
   "hooks": {
