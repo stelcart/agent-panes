@@ -2,6 +2,8 @@
 
 A VS Code extension that provides a heads-up display for working with [Claude Code](https://claude.ai/code) via the terminal. Uses files as the integration surface—no deep CC integration required.
 
+![CC HUD Screenshot](cc%20hud%20screenshot.png)
+
 ## Installation
 
 ### From VSIX (Recommended)
