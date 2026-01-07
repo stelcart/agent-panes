@@ -304,11 +304,14 @@ function parseTranscriptForTokens(transcriptPath) {
         }
 
         if (lastUsage) {
-            // Use input_tokens as the total context size
-            // Note: cache_read_input_tokens and cache_creation_input_tokens are for
-            // billing/performance tracking, not additional tokens. input_tokens represents
-            // the full prompt context sent to the model.
-            const inputTokens = lastUsage.input_tokens || 0;
+            // Total context = input_tokens + cache_creation_input_tokens + cache_read_input_tokens
+            // - input_tokens: non-cached tokens processed this request
+            // - cache_creation_input_tokens: tokens written to cache
+            // - cache_read_input_tokens: tokens read from cache
+            // All three together represent the full prompt context sent to the model.
+            const inputTokens = (lastUsage.input_tokens || 0) +
+                               (lastUsage.cache_creation_input_tokens || 0) +
+                               (lastUsage.cache_read_input_tokens || 0);
             return {
                 actualTokens: inputTokens,
                 tokenSource: 'api'
