@@ -1,3 +1,26 @@
+/**
+ * Workspace initialization for CC HUD extension.
+ *
+ * ## Hook Script Management
+ *
+ * This file contains embedded hook scripts as string constants (LOG_ACTIVITY_HOOK,
+ * SYNC_PLAN_HOOK, SYNC_CONTEXT_HOOK, PRE_COMPACT_HOOK). These constants are the
+ * SOURCE OF TRUTH for hook scripts and are written to each project's `.claude/hooks/`
+ * directory during initialization.
+ *
+ * The `.claude/hooks/` files in THIS repository (agent-panes) are just local copies
+ * for this specific project - they are NOT the source for distribution. When updating
+ * hook logic:
+ *
+ * 1. Update the embedded constant in this file (src/initialize.ts)
+ * 2. Run the extension's "CC HUD: Initialize Workspace" command to update the local
+ *    `.claude/hooks/` files, OR manually copy the changes
+ * 3. Test the changes
+ *
+ * This approach ensures all users get the same hook scripts when they initialize
+ * their workspaces, and avoids needing to bundle/read external files at runtime.
+ */
+
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -42,6 +65,7 @@ interface HookEntry {
 interface ClaudeHooks {
     PostToolUse?: HookMatcher[];
     SessionStart?: HookEntry[];
+    PreCompact?: HookEntry[];
 }
 
 interface ClaudeSettings {
@@ -70,7 +94,10 @@ const DEFAULT_CONTEXT = {
     items: []
 };
 
-// Hook script that logs tool activity to .cc/cc.log
+/**
+ * Hook script: logs tool activity to .cc/cc.log
+ * SOURCE OF TRUTH - see module header for maintenance instructions.
+ */
 const LOG_ACTIVITY_HOOK = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
@@ -129,8 +156,11 @@ process.stdin.on('end', () => {
 });
 `;
 
-// Hook script that syncs TodoWrite tool output to .cc/plan.md
-// Only updates the "## Current Tasks" section, preserving other content
+/**
+ * Hook script: syncs TodoWrite tool output to .cc/plan.md
+ * Only updates the "## Current Tasks" section, preserving other content.
+ * SOURCE OF TRUTH - see module header for maintenance instructions.
+ */
 const SYNC_PLAN_HOOK = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
@@ -207,8 +237,170 @@ process.stdin.on('end', () => {
 });
 `;
 
-// Hook script that syncs context/token stats to .cc/stats.json
+/**
+ * Hook script: syncs context/token stats to .cc/stats.json
+ * Parses JSONL transcript for actual API token counts.
+ * SOURCE OF TRUTH - see module header for maintenance instructions.
+ */
 const SYNC_CONTEXT_HOOK = `#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Parse JSONL transcript file and extract actual token usage from API responses
+ * Returns the most recent cumulative token count (API returns cumulative values)
+ */
+function parseTranscriptForTokens(transcriptPath) {
+    try {
+        const fileStats = fs.statSync(transcriptPath);
+        const MAX_READ_SIZE = 100 * 1024; // 100KB
+
+        let content;
+        if (fileStats.size > MAX_READ_SIZE) {
+            // Read only the last 100KB for performance
+            // Since we only need the most recent usage data (API returns cumulative counts),
+            // reading the tail of the file is sufficient
+            const fd = fs.openSync(transcriptPath, 'r');
+            try {
+                const buffer = Buffer.alloc(MAX_READ_SIZE);
+                fs.readSync(fd, buffer, 0, MAX_READ_SIZE, fileStats.size - MAX_READ_SIZE);
+                content = buffer.toString('utf8');
+            } finally {
+                fs.closeSync(fd);
+            }
+            // Skip first line as it may be partial due to starting mid-file
+            const firstNewline = content.indexOf('\\n');
+            if (firstNewline !== -1) {
+                content = content.substring(firstNewline + 1);
+            }
+        } else {
+            content = fs.readFileSync(transcriptPath, 'utf8');
+        }
+
+        const lines = content.trim().split('\\n');
+
+        let lastUsage = null;
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+
+            try {
+                const entry = JSON.parse(line);
+
+                // Skip sidechain entries (subagent operations have their own context)
+                if (entry.is_sidechain || entry.sidechain) continue;
+
+                // Look for usage data in the entry
+                if (entry.usage) {
+                    lastUsage = entry.usage;
+                }
+                // Also check nested message.usage pattern
+                if (entry.message?.usage) {
+                    lastUsage = entry.message.usage;
+                }
+            } catch {
+                // Skip malformed lines
+            }
+        }
+
+        if (lastUsage) {
+            // Use input_tokens as the total context size
+            // Note: cache_read_input_tokens and cache_creation_input_tokens are for
+            // billing/performance tracking, not additional tokens. input_tokens represents
+            // the full prompt context sent to the model.
+            const inputTokens = lastUsage.input_tokens || 0;
+            return {
+                actualTokens: inputTokens,
+                tokenSource: 'api'
+            };
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+    try {
+        const data = JSON.parse(input);
+        const projectDir = data.cwd || process.cwd();
+        const statsPath = path.join(projectDir, '.cc', 'stats.json');
+
+        // Ensure .cc directory exists
+        const ccDir = path.dirname(statsPath);
+        if (!fs.existsSync(ccDir)) {
+            fs.mkdirSync(ccDir, { recursive: true });
+        }
+
+        // Read existing stats to preserve compaction info
+        let existingStats = {};
+        if (fs.existsSync(statsPath)) {
+            try {
+                existingStats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+            } catch {
+                // Ignore parse errors
+            }
+        }
+
+        // Try to get actual token count from JSONL parsing
+        let actualTokens = null;
+        let tokenSource = 'estimated';
+        let transcriptChars = 0;
+
+        if (data.transcript_path && fs.existsSync(data.transcript_path)) {
+            try {
+                const transcriptFileStats = fs.statSync(data.transcript_path);
+                transcriptChars = transcriptFileStats.size;
+
+                // Parse JSONL for actual token usage
+                const parsed = parseTranscriptForTokens(data.transcript_path);
+                if (parsed) {
+                    actualTokens = parsed.actualTokens;
+                    tokenSource = parsed.tokenSource;
+                }
+            } catch {
+                // Ignore errors reading transcript
+            }
+        }
+
+        // Estimate tokens as fallback (chars / 4 is a common approximation)
+        const estimatedTokens = Math.round(transcriptChars / 4);
+
+        // Write stats (include both actual and estimated tokens)
+        const statsData = {
+            sessionId: data.session_id || null,
+            transcriptPath: data.transcript_path || null,
+            transcriptChars,
+            actualTokens,
+            estimatedTokens,
+            tokenSource,
+            lastTool: data.tool_name || 'unknown',
+            updatedAt: new Date().toISOString(),
+            // Preserve compaction info from previous stats
+            compactedAt: existingStats.compactedAt || null,
+            compactionType: existingStats.compactionType || null,
+            compactedSessionId: existingStats.compactedSessionId || null
+        };
+
+        fs.writeFileSync(statsPath, JSON.stringify(statsData, null, 2));
+
+    } catch (err) {
+        // Silent fail
+    }
+    process.exit(0);
+});
+`;
+
+/**
+ * Hook script: runs before context compaction
+ * Records compaction events to .cc/stats.json.
+ * SOURCE OF TRUTH - see module header for maintenance instructions.
+ */
+const PRE_COMPACT_HOOK = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 
@@ -227,34 +419,24 @@ process.stdin.on('end', () => {
             fs.mkdirSync(ccDir, { recursive: true });
         }
 
-        // Read transcript to estimate context size
-        let transcriptChars = 0;
-        if (data.transcript_path && fs.existsSync(data.transcript_path)) {
+        // Read existing stats
+        let stats = {};
+        if (fs.existsSync(statsPath)) {
             try {
-                const stats = fs.statSync(data.transcript_path);
-                transcriptChars = stats.size;
-            } catch (e) {
-                // Ignore errors reading transcript
+                stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+            } catch {
+                // Start fresh if parse fails
             }
         }
 
-        // Estimate tokens (chars / 4 is a common approximation)
-        const estimatedTokens = Math.round(transcriptChars / 4);
+        // Mark that compaction is about to occur (PreCompact hook runs before compaction)
+        stats.compactedAt = new Date().toISOString();
+        stats.compactionType = data.trigger || 'unknown'; // 'auto' or 'manual'
+        stats.compactedSessionId = data.session_id || null; // Track which session was compacted
 
-        // Write stats (include transcriptPath for direct reading fallback)
-        const statsData = {
-            sessionId: data.session_id || 'unknown',
-            transcriptPath: data.transcript_path || null,
-            transcriptChars,
-            estimatedTokens,
-            lastTool: data.tool_name || 'unknown',
-            updatedAt: new Date().toISOString()
-        };
-
-        fs.writeFileSync(statsPath, JSON.stringify(statsData, null, 2));
-
-    } catch (err) {
-        // Silent fail
+        fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
+    } catch {
+        // Silent fail - don't break Claude Code
     }
     process.exit(0);
 });
@@ -414,11 +596,15 @@ async function setupClaudeHook(rootPath: string): Promise<void> {
     const syncContextPath = path.join(hooksDir, 'sync-context.js');
     fs.writeFileSync(syncContextPath, SYNC_CONTEXT_HOOK);
 
+    const preCompactPath = path.join(hooksDir, 'pre-compact.js');
+    fs.writeFileSync(preCompactPath, PRE_COMPACT_HOOK);
+
     // Make executable on Unix systems
     try {
         fs.chmodSync(syncPlanPath, 0o755);
         fs.chmodSync(logActivityPath, 0o755);
         fs.chmodSync(syncContextPath, 0o755);
+        fs.chmodSync(preCompactPath, 0o755);
     } catch {
         // Ignore chmod errors on Windows
     }
@@ -502,6 +688,24 @@ async function setupClaudeHook(rootPath: string): Promise<void> {
                 {
                     type: "command",
                     command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/sync-context.js\"",
+                    timeout: 5
+                }
+            ]
+        });
+    }
+
+    // Add PreCompact hook for compaction detection
+    settings.hooks.PreCompact ??= [];
+    const existingPreCompactHook = settings.hooks.PreCompact.find(
+        (h: HookEntry) => h.hooks?.some((hook: HookCommand) => hook.command?.includes('pre-compact.js'))
+    );
+
+    if (existingPreCompactHook === undefined) {
+        settings.hooks.PreCompact.push({
+            hooks: [
+                {
+                    type: "command",
+                    command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.js\"",
                     timeout: 5
                 }
             ]

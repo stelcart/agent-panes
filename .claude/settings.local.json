@@ -16,7 +16,10 @@
       "Bash(git -C /Users/ido/source/agent-panes status:*)",
       "Bash(git -C /Users/ido/source/agent-panes diff HEAD)",
       "Bash(git -C /Users/ido/source/agent-panes log --oneline -10)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(node -c:*)",
+      "Bash(git -C /Users/ido/source/agent-panes add .claude/hooks/sync-context.js .claude/hooks/pre-compact.js .claude/settings.local.json CLAUDE.md src/initialize.ts src/providers/contextViewProvider.ts)",
+      "Bash(git -C /Users/ido/source/agent-panes commit -m \"$\\(cat <<''EOF''\nImprove context tracking with API tokens, compaction detection, and code quality\n\nContext Tracking Improvements:\n- Parse JSONL transcript for actual API token counts instead of estimating\n- Use only input_tokens \\(cache tokens are subsets, not additive\\)\n- Add 100KB tail-read optimization for large transcript files\n- Add try-finally to prevent file descriptor leaks\n\nCompaction Detection:\n- Add PreCompact hook to detect when context is compacted\n- Track compactedSessionId to show warning only for current session\n- Display warning in HUD when context was compacted\n\nCode Quality:\n- Fix ''unknown'' default to null for session IDs \\(prevents false matches\\)\n- Rename stats variables to fileStats/transcriptFileStats \\(avoid shadowing\\)\n- Add comprehensive documentation for hook maintenance\n- Document source of truth pattern in initialize.ts and CLAUDE.md\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   },
   "hooks": {
@@ -58,6 +61,17 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/sync-context.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.js\"",
             "timeout": 5
           }
         ]

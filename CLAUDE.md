@@ -27,8 +27,15 @@ Four sidebar panes: Todo, Plan, Thinking, Context. Entry point is `src/extension
 The extension installs hooks in `.claude/hooks/` that sync with Claude Code:
 - `sync-plan.js` - Syncs TodoWrite output to `.cc/plan.md`
 - `log-activity.js` - Logs tool usage to `.cc/cc.log`
+- `sync-context.js` - Syncs token/context stats to `.cc/stats.json`
+- `pre-compact.js` - Records compaction events
 
 Hook settings are in `.claude/settings.local.json`.
+
+**Hook Source of Truth**: The embedded string constants in `src/initialize.ts` (e.g., `LOG_ACTIVITY_HOOK`, `SYNC_PLAN_HOOK`) are the source of truth. These get written to each project's `.claude/hooks/` during initialization. The `.claude/hooks/` files in THIS repo are just local copies for development/testing. When updating hooks:
+1. Edit the constant in `src/initialize.ts`
+2. Re-run "CC HUD: Initialize Workspace" or manually sync the local files
+3. Test the changes
 
 ## Critical: Checkbox Format
 

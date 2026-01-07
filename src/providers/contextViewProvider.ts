@@ -10,6 +10,8 @@ interface SessionStats {
     sessionTokens: number;
     isStale: boolean;
     hasData: boolean;
+    tokenSource: 'api' | 'estimated' | 'none';
+    wasCompacted: boolean;
 }
 
 export class ContextViewProvider implements vscode.WebviewViewProvider {
@@ -30,7 +32,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
     private _getSessionStats(): SessionStats {
         const statsPath = getAbsolutePath(this._config.statsPath);
         if (statsPath === undefined || statsPath === '') {
-            return { sessionTokens: 0, isStale: true, hasData: false };
+            return { sessionTokens: 0, isStale: true, hasData: false, tokenSource: 'none', wasCompacted: false };
         }
 
         try {
@@ -38,7 +40,13 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             const stats = JSON.parse(statsContent) as {
                 updatedAt?: string;
                 estimatedTokens?: number;
+                actualTokens?: number | null;
+                tokenSource?: 'api' | 'estimated';
                 transcriptPath?: string;
+                compactedAt?: string | null;
+                compactionType?: string | null;
+                compactedSessionId?: string | null;
+                sessionId?: string | null;
             };
 
             // Check if data is stale (>5 min old)
@@ -46,24 +54,45 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
             const ageMs = Date.now() - updatedAt.getTime();
             const isStale = ageMs > 5 * 60 * 1000;
 
-            let sessionTokens = stats.estimatedTokens ?? 0;
+            // Check if context was compacted for the current session
+            // Show warning if compactedSessionId matches the current sessionId (not time-based)
+            let wasCompacted = false;
+            if (typeof stats.compactedAt === 'string' && stats.compactedAt !== '' &&
+                typeof stats.compactedSessionId === 'string' && stats.compactedSessionId !== '' &&
+                typeof stats.sessionId === 'string' && stats.sessionId !== '') {
+                // Show compaction warning if it occurred in the current session
+                wasCompacted = stats.compactedSessionId === stats.sessionId;
+            }
+
+            // Prefer actual tokens from API if available, otherwise use estimated
+            let sessionTokens = 0;
+            let tokenSource: 'api' | 'estimated' | 'none' = 'none';
+
+            if (typeof stats.actualTokens === 'number' && stats.actualTokens > 0) {
+                sessionTokens = stats.actualTokens;
+                tokenSource = 'api';
+            } else if (typeof stats.estimatedTokens === 'number' && stats.estimatedTokens > 0) {
+                sessionTokens = stats.estimatedTokens;
+                tokenSource = 'estimated';
+            }
 
             // If stale but we have transcript path, try direct read for fresh data
             if (isStale && typeof stats.transcriptPath === 'string' && stats.transcriptPath !== '') {
                 try {
                     const transcriptStats = fs.statSync(stats.transcriptPath);
                     sessionTokens = Math.round(transcriptStats.size / 4);
+                    tokenSource = 'estimated';
                     // Got fresh data from direct read
-                    return { sessionTokens, isStale: false, hasData: true };
+                    return { sessionTokens, isStale: false, hasData: true, tokenSource, wasCompacted };
                 } catch {
                     // Transcript file not accessible, use cached value
                 }
             }
 
-            return { sessionTokens, isStale, hasData: sessionTokens > 0 };
+            return { sessionTokens, isStale, hasData: sessionTokens > 0, tokenSource, wasCompacted };
         } catch {
             // File doesn't exist or can't be read
-            return { sessionTokens: 0, isStale: true, hasData: false };
+            return { sessionTokens: 0, isStale: true, hasData: false, tokenSource: 'none', wasCompacted: false };
         }
     }
 
@@ -230,7 +259,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         }
 
         // Get session stats from stats.json (with direct transcript fallback)
-        const { sessionTokens, hasData: hasSessionData } = this._getSessionStats();
+        const { sessionTokens, hasData: hasSessionData, tokenSource, wasCompacted } = this._getSessionStats();
 
         // Total = session context + plan + pinned files
         const pinnedTokens = Math.round(includedChars / 4);
@@ -377,8 +406,9 @@ export class ContextViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div class="meter-stats">
             ~${totalTokens.toLocaleString()} tokens / ${this._config.contextTokenLimit.toLocaleString()} limit
+            ${wasCompacted ? '<br><span style="color: var(--vscode-editorWarning-foreground, #ff9800);">&#9888; Context was compacted</span>' : ''}
             ${hasSessionData
-                ? `<br>Session: ~${sessionTokens.toLocaleString()} tokens`
+                ? `<br>Session: ~${sessionTokens.toLocaleString()} tokens${tokenSource === 'estimated' ? ' <span style="opacity:0.6">(est.)</span>' : ''}`
                 : '<br><span style="opacity:0.6">Session: waiting for CC activity...</span>'}
             <br>Plan: ~${planTokens.toLocaleString()} tokens
             ${pinnedTokens > 0 ? `<br>Pinned: ~${pinnedTokens.toLocaleString()} tokens` : ''}
